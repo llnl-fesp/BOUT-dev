@@ -1,3 +1,4 @@
+from __future__ import print_function
 # Flux surface generator for tokamak grid files
 
 try:
@@ -5,20 +6,20 @@ try:
     import sys
     import glob
 except ImportError:
-    print "ERROR: os, sys or glob modules not available"
+    print("ERROR: os, sys or glob modules not available")
     raise
 
 try:
     import numpy as np
 except ImportError:
-    print "ERROR: NumPy module not available"
+    print("ERROR: NumPy module not available")
     raise
 
 try:
-    from boututils import DataFile
+    from boututils.datafile import DataFile
 except ImportError:
-    print "ERROR: boututils.DataFile not available"
-    print "=> Set $PYTHONPATH variable to include BOUT++ pylib"
+    print("ERROR: boututils.DataFile not available")
+    print("=> Set $PYTHONPATH variable to include BOUT++ pylib")
     raise SystemExit
 
 def gen_surface(grid):
@@ -26,9 +27,9 @@ def gen_surface(grid):
     # Read the grid data
     nx = grid.read("nx")
     ny = grid.read("ny")
-    
+
     npol = grid.read("npol")
-    if npol == None:
+    if npol is None:
         # Domains not stored in file (BOUT style input)
         ixseps1 = grid.read("ixseps1")
         ixseps2 = grid.read("ixseps2")
@@ -36,31 +37,31 @@ def gen_surface(grid):
         jyseps1_2 = grid.read("jyseps1_2")
         jyseps2_1 = grid.read("jyseps2_1")
         jyseps2_2 = grid.read("jyseps2_2")
-        
+
         if ixseps1 == ixseps2:
             # Single null
             ndomains = 3
         else:
             # Double null
             ndomains = 6
-        
+
         yup_xsplit = np.zeros(ndomains)
         ydown_xsplit = np.zeros(ndomains)
         yup_xin = np.zeros(ndomains)
         yup_xout = np.zeros(ndomains)
         ydown_xin = np.zeros(ndomains)
         ydown_xout = np.zeros(ndomains)
-        
+
         ystart = np.zeros(ndomains+1)
         ystart[ndomains] = ny
-        
+
         # Inner lower leg
         ydown_xsplit[0] = -1
         ydown_xout[0] = -1
         yup_xsplit[0] = ixseps1
         yup_xin[0] = ndomains-1 # Outer lower leg
         yup_xout[0] = 1
-        
+
         # Outer lower leg
         ydown_xsplit[ndomains-1] = ixseps1
         ydown_xin[ndomains-1] = 0
@@ -68,10 +69,10 @@ def gen_surface(grid):
         yup_xsplit[ndomains-1] = -1
         yup_xout[ndomains-1] = -1
         ystart[ndomains-1] = jyseps2_2+1
-        
+
         if ixseps1 == ixseps2:
             # Single null
-            
+
             ydown_xsplit[1] = ixseps1
             ydown_xin[1] = 1
             ydown_xout[1] = 0
@@ -81,7 +82,7 @@ def gen_surface(grid):
             ystart[1] = jyseps1_1+1
         else:
             # Double null
-            raise "SORRY - NO DOUBLE NULL YET"
+            raise RuntimeError("SORRY - NO DOUBLE NULL YET")
     else:
         # Use domains stored in the file
         ndomains = npol.size # Number of domains
@@ -91,35 +92,35 @@ def gen_surface(grid):
         yup_xout   = grid.read("yup_xout")
         ydown_xin  = grid.read("ydown_xin")
         ydown_xout = grid.read("ydown_xout")
-        
+
         # Calculate starting positions
         ystart = np.zeros(ndomains+1)
         for i in np.arange(1,ndomains):
             ystart[i] = ystart[i-1] + npol[i-1]
         ystart[ndomains] = ny
-    
+
     # Record whether a domain has been visited
     visited = np.zeros(ndomains)
-    
+
     x = 0      # X index
     while True:
         yinds = None # Y indices result
-        
+
         # Find a domain which hasn't been visited
         domain = None
         for i in np.arange(ndomains):
             if visited[i] == 0:
                 domain = i
                 break
-        
-        if domain == None:
+
+        if domain is None:
             # All domains visited
             x = x + 1 # Go to next x surface
             visited = np.zeros(ndomains) # Clear the visited array
             if x == nx:
                 break # Finished
             continue
-        
+
         # Follow surface back until it hits a boundary
         while True:
             if x < ydown_xsplit[domain]:
@@ -129,9 +130,9 @@ def gen_surface(grid):
             if d < 0:
                 break # Hit boundary
             domain = d # Keep going
-        
+
         # Starting from domain, follow surface
-        
+
         periodic = False
         while domain >= 0:
             if visited[domain] == 1:
@@ -140,7 +141,7 @@ def gen_surface(grid):
                 break;
             # Get range of y indices in this domain
             yi = np.arange(ystart[domain], ystart[domain+1])
-            if yinds == None:
+            if yinds is None:
                 yinds = yi
             else:
                 yinds = np.concatenate((yinds, yi))
@@ -151,6 +152,6 @@ def gen_surface(grid):
                 domain = yup_xin[domain]
             else:
                 domain = yup_xout[domain]
-        
+
         # Finished this surface
         yield x, yinds, periodic

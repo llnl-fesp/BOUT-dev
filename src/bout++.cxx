@@ -27,6 +27,7 @@
 
 const char DEFAULT_DIR[] = "data";
 const char DEFAULT_OPT[] = "BOUT.inp";
+const char DEFAULT_SET[] = "BOUT.settings";
 
 // MD5 Checksum passed at compile-time
 #define CHECKSUM1_(x) #x
@@ -48,13 +49,15 @@ const char DEFAULT_OPT[] = "BOUT.inp";
 #include <bout/solver.hxx>
 #include <boutexception.hxx>
 #include <optionsreader.hxx>
-#include <derivs.hxx>
 #include <msg_stack.hxx>
 
 #include <bout/sys/timer.hxx>
 
 #include <boundary_factory.hxx>
 
+#include <invert_laplace.hxx>
+
+#include <bout/slepclib.hxx>
 #include <bout/petsclib.hxx>
 
 #include <time.h>
@@ -65,6 +68,7 @@ const char DEFAULT_OPT[] = "BOUT.inp";
 using std::string;
 using std::list;
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #ifdef _OPENMP
@@ -74,6 +78,9 @@ using std::list;
 #ifdef SIGHANDLE
 #include <signal.h>
 void bout_signal_handler(int sig);  // Handles segmentation faults
+#endif
+#ifdef BOUT_FPE
+#include <fenv.h>
 #endif
 
 #include <output.hxx>
@@ -86,59 +93,118 @@ char get_spin();                    // Produces a spinning bar
 
 /*!
   Initialise BOUT++
-  
+
   Inputs
   ------
-  
+
   The command-line arguments argc and argv are passed by
   reference, and pointers to these will be stored in various
   places in BOUT++.
-  
+
+  Outputs
+  -------
+
+  Any non-zero return value should halt the simulation. If the return value is
+  less than zero, the exit status from BOUT++ is 0, otherwise it is the return
+  value of BoutInitialise.
+
  */
-void BoutInitialise(int &argc, char **&argv) {
+int BoutInitialise(int &argc, char **&argv) {
 
   string dump_ext; ///< Extensions for restart and dump files
 
   const char *data_dir; ///< Directory for data input/output
   const char *opt_file; ///< Filename for the options file
-  
+  const char *set_file; ///< Filename for the options file
+
 #ifdef SIGHANDLE
   /// Set a signal handler for segmentation faults
   signal(SIGSEGV, bout_signal_handler);
+#ifdef BOUT_FPE
+  signal(SIGFPE,  bout_signal_handler);
 #endif
-
+#endif
+#ifdef BOUT_FPE
+  feenableexcept(FE_DIVBYZERO | FE_INVALID | FE_OVERFLOW);
+#endif
+  
   // Set default data directory
   data_dir = DEFAULT_DIR;
   opt_file = DEFAULT_OPT;
+  set_file = DEFAULT_SET;
 
   /// Check command-line arguments
   /// NB: "restart" and "append" are now caught by options
+  /// Check for help flag separately
   for (int i=1;i<argc;i++) {
-    if (strncasecmp(argv[i], "-d", 2) == 0) {
+    if (string(argv[i]) == "-h" ||
+    	string(argv[i]) == "--help") {
+      // Print help message -- note this will be displayed once per processor as we've not started MPI yet.
+      fprintf(stdout, "Usage: %s [-d <data directory>] [-f <options filename>] [restart [append]] [VAR=VALUE]\n", argv[0]);
+      fprintf(stdout, "\n"
+	      "  -d <data directory>\tLook in <data directory> for input/output files\n"
+	      "  -f <options filename>\tUse OPTIONS given in <options filename>\n"
+	      "  -o <settings filename>\tSave used OPTIONS given to <options filename>\n"
+	      "  -h, --help\t\tThis message\n"
+	      "  restart [append]\tRestart the simulation. If append is specified, append to the existing output files, otherwise overwrite them\n"
+	      "  VAR=VALUE\t\tSpecify a VALUE for input parameter VAR\n"
+	      "\nFor all possible input parameters, see the user manual and/or the physics model source (e.g. %s.cxx)\n", argv[0]);
+
+      return -1;
+    }
+  }
+  for (int i=1;i<argc;i++) {
+    if (string(argv[i]) == "-d") {
       // Set data directory
       if (i+1 >= argc) {
-        fprintf(stderr, "Useage is %s -d <data directory>\n", argv[0]);
-        return;
+        fprintf(stderr, "Usage is %s -d <data directory>\n", argv[0]);
+        return 1;
       }
       i++;
       data_dir = argv[i];
     }
-    if (strncasecmp(argv[i], "-f", 2) == 0) {
+    if (string(argv[i]) == "-f") {
       // Set options file
       if (i+1 >= argc) {
-        fprintf(stderr, "Useage is %s -f <options filename>\n", argv[0]);
-        return;
+        fprintf(stderr, "Usage is %s -f <options filename>\n", argv[0]);
+        return 1;
       }
       i++;
       opt_file = argv[i];
     }
+    if (string(argv[i]) == "-o") {
+      // Set options file
+      if (i+1 >= argc) {
+        fprintf(stderr, "Usage is %s -o <settings filename>\n", argv[0]);
+        return 1;
+      }
+      i++;
+      set_file = argv[i];
+    }
   }
-  
+
+  if (std::string(set_file) == std::string(opt_file)){
+    throw BoutException("Input and output file for settings must be different.\nProvide -o <settings file> to avoid this issue.\n");
+  }
+
+  // Check that data_dir exists. We do not check whether we can write, as it is
+  // sufficient that the files we need are writeable ...
+  struct stat test;
+  if (stat(data_dir, &test) == 0){
+    if (!S_ISDIR(test.st_mode)){
+      throw BoutException("DataDir \"%s\" is not a directory\n",data_dir);
+    }
+  } else {
+    throw BoutException("DataDir \"%s\" does not exist or is not accessible\n",data_dir);
+  }
+
   // Set options
   Options::getRoot()->set("datadir", string(data_dir));
   Options::getRoot()->set("optionfile", string(opt_file));
+  Options::getRoot()->set("settingsfile", string(set_file));
 
   // Set the command-line arguments
+  SlepcLib::setArgs(argc, argv); // SLEPc initialisation
   PetscLib::setArgs(argc, argv); // PETSc initialisation
   Solver::setArgs(argc, argv);   // Solver initialisation
   BoutComm::setArgs(argc, argv); // MPI initialisation
@@ -152,7 +218,9 @@ void BoutInitialise(int &argc, char **&argv) {
 
   /// Open an output file to echo everything to
   /// On processor 0 anything written to output will go to stdout and the file
-  output.open("%s/BOUT.log.%d", data_dir, MYPE);
+  if (output.open("%s/BOUT.log.%d", data_dir, MYPE)) {
+    return 1;
+  }
 
   /// Print intro
   output.write("\nBOUT++ version %.2f\n", BOUT_VERSION);
@@ -174,7 +242,7 @@ void BoutInitialise(int &argc, char **&argv) {
 
   output.write("Compile-time options:\n");
 
-#ifdef CHECK
+#if CHECK > 0
   output.write("\tChecking enabled, level %d\n", CHECK);
 #else
   output.write("\tChecking disabled\n");
@@ -184,12 +252,6 @@ void BoutInitialise(int &argc, char **&argv) {
   output.write("\tSignal handling enabled\n");
 #else
   output.write("\tSignal handling disabled\n");
-#endif
-
-#ifdef PDBF
-  output.write("\tPDB support enabled\n");
-#else
-  output.write("\tPDB support disabled\n");
 #endif
 
 #ifdef NCDF
@@ -205,13 +267,17 @@ void BoutInitialise(int &argc, char **&argv) {
 #endif
 
 #ifdef _OPENMP
-  output.write("\tOpenMP parallelisation enabled\n");
+  output.write("\tOpenMP parallelisation enabled, using %d threads\n",omp_get_max_threads());
 #else
   output.write("\tOpenMP parallelisation disabled\n");
 #endif
 
 #ifdef METRIC3D
   output.write("\tRUNNING IN 3D-METRIC MODE\n");
+#endif
+
+#ifdef BOUT_FPE
+  output.write("\tFloatingPointExceptions enabled\n");
 #endif
 
   /// Get the options tree
@@ -224,13 +290,21 @@ void BoutInitialise(int &argc, char **&argv) {
 
     // Get options override from command-line
     reader->parseCommandLine(options, argc, argv);
-  }catch(BoutException *e) {
+
+    // Save settings
+    reader->write(options, "%s/%s", data_dir,set_file);
+  }catch(BoutException &e) {
     output << "Error encountered during initialisation\n";
-    output << e->what() << endl;
-    return;
+    output << e.what() << endl;
+    return 1;
   }
 
   try {
+    /////////////////////////////////////////////
+    
+    mesh = Mesh::create();  ///< Create the mesh
+    mesh->load();           ///< Load from sources. Required for Field initialisation
+    mesh->setParallelTransform(); ///< Set the parallel transform from options
     /////////////////////////////////////////////
     /// Get some settings
 
@@ -240,20 +314,11 @@ void BoutInitialise(int &argc, char **&argv) {
 
     /// Get file extensions
     options->get("dump_format", dump_ext, "nc");
-
-    /// Setup derivative methods
-    if (derivs_init()) {
-      output.write("Failed to initialise derivative methods. Aborting\n");
-      return;
-    }
-
+    
     ////////////////////////////////////////////
 
     // Set up the "dump" data output file
     output << "Setting up output (dump) file\n";
-
-    if(!options->getSection("output")->isSet("floats"))
-      options->getSection("output")->set("floats", true, "default"); // by default output floats
 
     dump = Datafile(options->getSection("output"));
     
@@ -265,14 +330,12 @@ void BoutInitialise(int &argc, char **&argv) {
     }
 
     /// Add book-keeping variables to the output files
-    dump.writeVar(BOUT_VERSION, "BOUT_VERSION");
-    dump.add(simtime, "t_array", 1); // Appends the time of dumps into an array
-    dump.add(iteration, "iteration", 0);
+    dump.add(const_cast<BoutReal&>(BOUT_VERSION), "BOUT_VERSION", false);
+    dump.add(simtime, "t_array", true); // Appends the time of dumps into an array
+    dump.add(iteration, "iteration", false);
 
-    ///////////////////////////////////////////////
-    
-    mesh = Mesh::create();  ///< Create the mesh
-    mesh->load();           ///< Load from sources. Required for Field initialisation
+    ////////////////////////////////////////////
+
     mesh->outputVars(dump); ///< Save mesh configuration into output file
     
   }catch(BoutException &e) {
@@ -280,6 +343,7 @@ void BoutInitialise(int &argc, char **&argv) {
     BoutComm::cleanup();
     throw;
   }
+  return 0;
 }
 
 int bout_run(Solver *solver, rhsfunc physics_run) {
@@ -288,22 +352,43 @@ int bout_run(Solver *solver, rhsfunc physics_run) {
   solver->setRHS(physics_run);
   
   /// Add the monitor function
-  solver->addMonitor(bout_monitor);
+  solver->addMonitor(bout_monitor, Solver::BACK);
 
   /// Run the simulation
   return solver->solve();
 }
 
 int BoutFinalise() {
+
+  // Output the settings, showing which options were used
+  // This overwrites the file written during initialisation
+  try {
+    string data_dir;
+    Options::getRoot()->get("datadir", data_dir, "data");
+
+    OptionsReader *reader = OptionsReader::getInstance();
+    std::string settingsfile;
+    OPTION(Options::getRoot(),settingsfile,"");
+    reader->write(Options::getRoot(), "%s/%s", data_dir.c_str(),settingsfile.c_str());
+  }catch(BoutException &e) {
+    output << "Error whilst writing settings" << endl;
+    output << e.what() << endl;
+  }
+  
   // Delete the mesh
   delete mesh;
 
   // Close the output file
   dump.close();
+  
+  // Make sure all processes have finished writing before exit
+  MPI_Barrier(BoutComm::get());
+
+  // Laplacian inversion
+  Laplacian::cleanup();
 
   // Delete field memory
-  Field2D::cleanup();
-  Field3D::cleanup();
+  Array<double>::cleanup();
 
   // Cleanup boundary factory
   BoundaryFactory::cleanup();
@@ -317,6 +402,9 @@ int BoutFinalise() {
 
   // Debugging message stack
   msg_stack.clear();
+
+  // Call SlepcFinalize if not already called
+  SlepcLib::cleanup();
 
   // Call PetscFinalize if not already called
   PetscLib::cleanup();
@@ -337,13 +425,11 @@ int BoutFinalise() {
  **************************************************************************/
 
 int bout_monitor(Solver *solver, BoutReal t, int iter, int NOUT) {
+  TRACE("bout_monitor(%e, %d, %d)", t, iter, NOUT);
+
   // Data used for timing
   static bool first_time = true;
   static BoutReal wall_limit, mpi_start_time; // Keep track of remaining wall time
-
-#ifdef CHECK
-  int msg_point = msg_stack.push("bout_monitor(%e, %d, %d)", t, iter, NOUT);
-#endif
 
   // Set the global variables. This is done because they need to be
   // written to the output file before the first step (initial condition)
@@ -356,6 +442,9 @@ int bout_monitor(Solver *solver, BoutReal t, int iter, int NOUT) {
   /// Collect timing information
   BoutReal wtime        = Timer::resetTime("run");
   int ncalls            = solver->rhs_ncalls;
+  int ncalls_e		= solver->rhs_ncalls_e;
+  int ncalls_i		= solver->rhs_ncalls_i;
+  bool output_split     = solver->splitOperator();
   BoutReal wtime_rhs    = Timer::resetTime("rhs");
   BoutReal wtime_invert = Timer::resetTime("invert");
   BoutReal wtime_comms  = Timer::resetTime("comms");  // Time spent communicating (part of RHS)
@@ -372,23 +461,36 @@ int bout_monitor(Solver *solver, BoutReal t, int iter, int NOUT) {
     wall_limit *= 60.0*60.0;  // Convert from hours to seconds
 
     /// Record the starting time
-    mpi_start_time = MPI_Wtime(); // NB: Miss time for first step (can be big!)
+    mpi_start_time = MPI_Wtime() - wtime;
 
     first_time = false;
 
     /// Print the column header for timing info
-    output.write("Sim Time  |  RHS evals  | Wall Time |  Calc    Inv   Comm    I/O   SOLVER\n\n");
-
+    if(!output_split){
+	    output.write("Sim Time  |  RHS evals  | Wall Time |  Calc    Inv   Comm    I/O   SOLVER\n\n");
+    }else{
+	    output.write("Sim Time  |  RHS_e evals  | RHS_I evals  | Wall Time |  Calc    Inv   Comm    I/O   SOLVER\n\n");
+    }
   }
   
-  output.write("%.3e      %5d       %.2e   %5.1f  %5.1f  %5.1f  %5.1f  %5.1f\n", 
+ 
+  if(!output_split){
+    output.write("%.3e      %5d       %.2e   %5.1f  %5.1f  %5.1f  %5.1f  %5.1f\n", 
                simtime, ncalls, wtime,
                100.0*(wtime_rhs - wtime_comms - wtime_invert)/wtime,
                100.*wtime_invert/wtime,  // Inversions
                100.0*wtime_comms/wtime,  // Communications
                100.* wtime_io / wtime,      // I/O
                100.*(wtime - wtime_io - wtime_rhs)/wtime); // Everything else
-  
+  }else{
+    output.write("%.3e      %5d            %5d       %.2e   %5.1f  %5.1f  %5.1f  %5.1f  %5.1f\n",
+               simtime, ncalls_e, ncalls_i, wtime,
+               100.0*(wtime_rhs - wtime_comms - wtime_invert)/wtime,
+               100.*wtime_invert/wtime,  // Inversions
+               100.0*wtime_comms/wtime,  // Communications
+               100.* wtime_io / wtime,      // I/O
+               100.*(wtime - wtime_io - wtime_rhs)/wtime); // Everything else
+  }
   
   // This bit only to screen, not log file
 
@@ -404,18 +506,11 @@ int bout_monitor(Solver *solver, BoutReal t, int iter, int NOUT) {
       // Less than 1 time-step left
       output.write("Only %e seconds left. Quitting\n", t_remain);
 
-#ifdef CHECK
-      msg_stack.pop(msg_point);
-#endif
       return 1; // Return an error code to quit
     } else {
       output.print(" Wall %s", (time_to_hms(t_remain)).c_str());
     }
   }
-  
-#ifdef CHECK
-  msg_stack.pop(msg_point);
-#endif
 
   return 0;
 }
@@ -425,24 +520,8 @@ int bout_monitor(Solver *solver, BoutReal t, int iter, int NOUT) {
  **************************************************************************/
 
 /// Print an error message and exit
-void bout_error() {
-  bout_error(NULL);
-}
-
 void bout_error(const char *str) {
-  output.write("****** ERROR CAUGHT ******\n");
-
-  if (str != NULL) output.write(str);
-
-  output.write("\n");
-
-#ifdef CHECK
-  msg_stack.dump();
-#endif
-
-  MPI_Abort(BoutComm::get(), 1);
-
-  exit(1);
+  throw BoutException(str);
 }
 
 #ifdef SIGHANDLE
@@ -450,14 +529,31 @@ void bout_error(const char *str) {
 void bout_signal_handler(int sig) {
   /// Set signal handler back to default to prevent possible infinite loop
   signal(SIGSEGV, SIG_DFL);
+  // print number of process to stderr, so the user knows which log to check
+  int world_rank;
+  MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+  fprintf(stderr,"\nSighandler called on process %d with sig %d\n"
+          ,world_rank,sig);
 
-  output.write("\n****** SEGMENTATION FAULT CAUGHT ******\n\n");
-#ifdef CHECK
-  /// Print out the message stack to help debugging
-  msg_stack.dump();
-#else
-  output.write("Enable checking (-DCHECK flag) to get a trace\n");
-#endif
+  switch (sig){
+  case SIGSEGV:
+    throw BoutException("\n****** SEGMENTATION FAULT CAUGHT ******\n\n");
+    break;
+  case SIGFPE:
+    throw BoutException("\n****** Floating Point Exception "
+                        "(FPE) caught ******\n\n");
+    break;
+  case SIGINT:
+    throw BoutException("\n****** SigInt caught ******\n\n");
+    break;
+  case SIGKILL:
+    throw BoutException("\n****** SigKill caught ******\n\n");
+    break;
+  default:
+    throw BoutException("\n****** Signal %d  caught ******\n\n",sig);
+    break;
+  }
+
 
   exit(sig);
 }

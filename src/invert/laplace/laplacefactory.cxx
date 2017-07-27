@@ -13,6 +13,7 @@
 #include "impls/mumps/mumps_laplace.hxx"
 #include "impls/cyclic/cyclic_laplace.hxx"
 #include "impls/shoot/shoot_laplace.hxx"
+#include "impls/multigrid/multigrid_laplace.hxx"
 
 #define LAPLACE_SPT  "spt"
 #define LAPLACE_PDD  "pdd"
@@ -22,6 +23,7 @@
 #define LAPLACE_MUMPS "mumps"
 #define LAPLACE_CYCLIC "cyclic"
 #define LAPLACE_SHOOT "shoot"
+#define LAPLACE_MULTIGRID "multigrid"
 
 LaplaceFactory* LaplaceFactory::instance = NULL;
 
@@ -36,14 +38,14 @@ LaplaceFactory* LaplaceFactory::getInstance() {
 Laplacian* LaplaceFactory::createLaplacian(Options *options) {
   if(options == NULL)
     options = Options::getRoot()->getSection("laplace");
-  
+
   string type;
-  
+
   if(mesh->firstX() && mesh->lastX()) {
     // Can use serial algorithm
-  
+
     options->get("type", type, LAPLACE_TRI);
-    
+
     if(strcasecmp(type.c_str(), LAPLACE_TRI) == 0) {
       return new LaplaceSerialTri(options);
     }else if(strcasecmp(type.c_str(), LAPLACE_BAND) == 0) {
@@ -58,13 +60,16 @@ Laplacian* LaplaceFactory::createLaplacian(Options *options) {
       return new LaplaceCyclic(options);
     }else if(strcasecmp(type.c_str(), LAPLACE_SHOOT) == 0) {
       return new LaplaceShoot(options);
+    }else if(strcasecmp(type.c_str(), LAPLACE_MULTIGRID) == 0) {
+      return new LaplaceMultigrid(options);
     }else {
       throw BoutException("Unknown serial Laplacian solver type '%s'", type.c_str());
     }
   }
-  
+
   options->get("type", type, LAPLACE_SPT);
 
+  // Parallel algorithm
   if(strcasecmp(type.c_str(), LAPLACE_PDD) == 0) {
     return new LaplacePDD(options);
   }else if(strcasecmp(type.c_str(), LAPLACE_SPT) == 0) {
@@ -77,6 +82,8 @@ Laplacian* LaplaceFactory::createLaplacian(Options *options) {
     return new LaplaceCyclic(options);
   }else if(strcasecmp(type.c_str(), LAPLACE_SHOOT) == 0) {
     return new LaplaceShoot(options);
+  }else if(strcasecmp(type.c_str(), LAPLACE_MULTIGRID) == 0) {
+      return new LaplaceMultigrid(options);
   }else {
     throw BoutException("Unknown parallel Laplacian solver type '%s'", type.c_str());
   }

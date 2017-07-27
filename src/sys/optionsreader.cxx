@@ -1,5 +1,7 @@
 #include <optionsreader.hxx>
 #include <boutexception.hxx>
+#include <msg_stack.hxx>
+#include <bout/assert.hxx>
 #include <utils.hxx>
 
 // Interface for option file parsers
@@ -21,12 +23,10 @@ OptionsReader* OptionsReader::getInstance() {
 void OptionsReader::read(Options *options, const char *file, ...) {
   if(file == (const char*) NULL) throw new BoutException("OptionsReader::read passed NULL filename\n");
 
-  va_list ap;  // List of arguments
-  char filename[512];
+  int buf_len=512;
+  char * filename=new char[buf_len];
 
-  va_start(ap, file);
-  vsprintf(filename, file, ap);
-  va_end(ap);
+  bout_vsnprintf(filename,buf_len, file);
 
   output.write("Reading options file %s\n", filename);
 
@@ -35,6 +35,27 @@ void OptionsReader::read(Options *options, const char *file, ...) {
 
   parser->read(options, filename);
 
+  delete[] filename;
+  delete parser;
+}
+
+void OptionsReader::write(Options *options, const char *file, ...) {
+  TRACE("OptionsReader::write");
+  ASSERT0(file != nullptr);
+
+  int buf_len=512;
+  char * filename=new char[buf_len];
+
+  bout_vsnprintf(filename,buf_len, file);
+  
+  output.write("Writing options to file %s\n", filename);
+
+  // Need to decide what file format to use
+  OptionParser *parser = new OptionINI();
+
+  parser->write(options, filename);
+
+  delete[] filename;
   delete parser;
 }
 
@@ -45,14 +66,15 @@ void OptionsReader::parseCommandLine(Options *options, int argc, char **argv) {
   string buffer;
 
   // Go through command-line arguments
-  for (size_t i=1;i<argc;i++) {
+  for (int i=1;i<argc;i++) {
 
     // Reset the section
     options = options->getRoot();
 
     buffer = argv[i];
-    // Test if name starts with a '-'
-    bool startdash = buffer[0] == '-';
+    // Test if name starts with a '-', and remove if found
+    if (buffer[0] == '-')
+      buffer = buffer.substr(1);  // Remove the first character (-)
     
     // Test to see if the user put spaces around the '=' sign
     if (i < argc-1) {
@@ -77,8 +99,6 @@ void OptionsReader::parseCommandLine(Options *options, int argc, char **argv) {
       }
     }
     
-    if (startdash) buffer = buffer.substr(1);
-    
     size_t startpos = buffer.find_first_of("=");
 
     if (startpos == string::npos) {
@@ -94,15 +114,12 @@ void OptionsReader::parseCommandLine(Options *options, int argc, char **argv) {
       string key = trim(buffer.substr(0, startpos));
       string value = trim(buffer.substr(startpos+1));
       
-      if(!startdash) {
-        // Only split into sections if no dash at start
-        size_t scorepos;
-        while((scorepos = key.find_first_of(":")) != string::npos) {
-          // sub-section
-          string section = key.substr(0,scorepos);
-          key = trim(key.substr(scorepos+1));
-          options = options->getSection(section);
-        }
+      size_t scorepos;
+      while((scorepos = key.find_first_of(":")) != string::npos) {
+	// sub-section
+	string section = key.substr(0,scorepos);
+	key = trim(key.substr(scorepos+1));
+	options = options->getSection(section);
       }
       
       if(key.empty() || value.empty()) throw BoutException("\tEmpty key or value in command line '%s'\n", buffer.c_str());

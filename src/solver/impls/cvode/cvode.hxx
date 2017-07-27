@@ -63,10 +63,12 @@ class CvodeSolver : public Solver {
     
     BoutReal getCurrentTimestep() { return hcur; }
 
-    int init(bool restarting, int nout, BoutReal tstep);
+    int init(int nout, BoutReal tstep) override;
 
-    int run();
+    int run() override;
     BoutReal run(BoutReal tout);
+    
+    void resetInternalFields();
 
     // These functions used internally (but need to be public)
     void rhs(BoutReal t, BoutReal *udata, BoutReal *dudata);
@@ -87,7 +89,7 @@ class CvodeSolver : public Solver {
     BoutReal pre_ncalls; // Number of calls to preconditioner
     
     void set_abstol_values(BoutReal* abstolvec_data, vector<BoutReal> &f2dtols, vector<BoutReal> &f3dtols);
-    void loop_abstol_values_op(int jx, int jy, BoutReal* abstolvec_data, int &p, vector<BoutReal> &f2dtols, vector<BoutReal> &f3dtols);
+    void loop_abstol_values_op(int jx, int jy, BoutReal* abstolvec_data, int &p, vector<BoutReal> &f2dtols, vector<BoutReal> &f3dtols, bool bndry);
 };
 
 #endif // __SUNDIAL_SOLVER_H__

@@ -40,6 +40,7 @@ class PvodeSolver;
 
 #include <pvode/nvector.h>
 #include <pvode/cvode.h>     // main CVODE header file
+#include <pvode/pvbbdpre.h>  // band preconditioner function prototypes
 
 class PvodeSolver : public Solver {
  public:
@@ -48,9 +49,9 @@ class PvodeSolver : public Solver {
   
   BoutReal getCurrentTimestep() { return hcur; }
   
-  int init(bool restarting, int nout, BoutReal tstep);
+  int init(int nout, BoutReal tstep) override;
   
-  int run();
+  int run() override;
   BoutReal run(BoutReal tout);
 
   // These functions used internally (but need to be public)
@@ -65,6 +66,9 @@ class PvodeSolver : public Solver {
   pvode::N_Vector u;
   pvode::machEnvType machEnv;
   void *cvode_mem;
+
+  BoutReal abstol, reltol; // addresses passed in init must be preserved
+  pvode::PVBBDData pdata;
 };
 
 #endif // __PVODE_SOLVER_H__

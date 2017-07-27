@@ -10,12 +10,12 @@
 
 #include <output.hxx>
 
-RK4Solver::RK4Solver() : Solver() {
-  f0 = 0; // Mark as uninitialised
+RK4Solver::RK4Solver(Options *options) : Solver(options), f0(nullptr) {
+  canReset = true;
 }
 
 RK4Solver::~RK4Solver() {
-  if(f0 == 0) {
+  if(f0 != nullptr) {
     delete[] f0;
     delete[] f1;
     delete[] f2;
@@ -36,12 +36,12 @@ void RK4Solver::setMaxTimestep(BoutReal dt) {
     timestep = dt; // Won't be used this time, but next
 }
 
-int RK4Solver::init(bool restarting, int nout, BoutReal tstep) {
+int RK4Solver::init(int nout, BoutReal tstep) {
 
-  int msg_point = msg_stack.push("Initialising RK4 solver");
+  TRACE("Initialising RK4 solver");
   
   /// Call the generic initialisation first
-  if(Solver::init(restarting, nout, tstep))
+  if (Solver::init(nout, tstep))
     return 1;
   
   output << "\n\tRunge-Kutta 4th-order solver\n";
@@ -79,8 +79,6 @@ int RK4Solver::init(bool restarting, int nout, BoutReal tstep) {
   save_vars(f0);
   
   // Get options
-  Options *options = Options::getRoot();
-  options = options->getSection("solver");
   OPTION(options, atol, 1.e-5); // Absolute tolerance
   OPTION(options, rtol, 1.e-3); // Relative tolerance
   OPTION(options, max_timestep, tstep); // Maximum timestep
@@ -88,13 +86,11 @@ int RK4Solver::init(bool restarting, int nout, BoutReal tstep) {
   OPTION(options, mxstep, 500); // Maximum number of steps between outputs
   OPTION(options, adaptive, false);
 
-  msg_stack.pop(msg_point);
-
   return 0;
 }
 
 int RK4Solver::run() {
-  int msg_point = msg_stack.push("RK4Solver::run()");
+  TRACE("RK4Solver::run()");
   
   for(int s=0;s<nsteps;s++) {
     BoutReal target = simtime + out_timestep;
@@ -114,7 +110,6 @@ int RK4Solver::run() {
         }
         if(adaptive) {
           // Take two half-steps
-          output << simtime << ", " << timestep << ", " << dt << endl;
           take_step(simtime,          0.5*dt, f0, f1);
           take_step(simtime + 0.5*dt, 0.5*dt, f1, f2);
           
@@ -164,34 +159,33 @@ int RK4Solver::run() {
       call_timestep_monitors(simtime, dt);
     }while(running);
     
+    load_vars(f0); // Put result into variables
+    // Call rhs function to get extra variables at this time
+    run_rhs(simtime);
+    
     iteration++; // Advance iteration number
-    
-    /// Write the restart file
-    restart.write();
-    
-    if((archive_restart > 0) && (iteration % archive_restart == 0)) {
-      restart.write("%s/BOUT.restart_%04d.%s", restartdir.c_str(), iteration, restartext.c_str());
-    }
     
     /// Call the monitor function
     
     if(call_monitors(simtime, s, nsteps)) {
-      // User signalled to quit
-      
-      // Write restart to a different file
-      restart.write("%s/BOUT.final.%s", restartdir.c_str(), restartext.c_str());
-      
-      output.write("Monitor signalled to quit. Returning\n");
-      break;
+      break; // Stop simulation
     }
     
     // Reset iteration and wall-time count
     rhs_ncalls = 0;
   }
   
-  msg_stack.pop(msg_point);
-  
   return 0;
+}
+
+void RK4Solver::resetInternalFields(){
+  //Zero out history
+  for(int i=0;i<nlocal;i++){
+    f1[i]=0; f2[i]=0;
+  }
+  
+  //Copy fields into current step
+  save_vars(f0);
 }
 
 void RK4Solver::take_step(BoutReal curtime, BoutReal dt, BoutReal *start, BoutReal *result) {

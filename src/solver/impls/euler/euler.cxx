@@ -10,12 +10,15 @@
 
 #include <output.hxx>
 
-EulerSolver::EulerSolver() : Solver() {
+EulerSolver::EulerSolver(Options *options) : Solver(options), f0(nullptr) {
   
 }
 
 EulerSolver::~EulerSolver() {
-
+  if(f0 != nullptr){
+    delete[] f0;
+    delete[] f1;
+  }
 }
 
 void EulerSolver::setMaxTimestep(BoutReal dt) {
@@ -26,11 +29,11 @@ void EulerSolver::setMaxTimestep(BoutReal dt) {
   timestep_reduced = true;
 }
 
-int EulerSolver::init(bool restarting, int nout, BoutReal tstep) {
-  int msg_point = msg_stack.push("Initialising Euler solver");
+int EulerSolver::init(int nout, BoutReal tstep) {
+  TRACE("Initialising Euler solver");
   
   /// Call the generic initialisation first
-  if(Solver::init(restarting, nout, tstep))
+  if (Solver::init(nout, tstep))
     return 1;
   
   output << "\n\tEuler solver\n";
@@ -39,9 +42,7 @@ int EulerSolver::init(bool restarting, int nout, BoutReal tstep) {
   out_timestep = tstep;
   
   // Get options
-  Options *options = Options::getRoot();
-  options = options->getSection("solver");
-  OPTION(options, start_timestep, tstep);
+  OPTION(options, timestep, tstep);
   OPTION(options, mxstep, 500); // Maximum number of steps between outputs
   OPTION(options, cfl_factor, 2.);
 
@@ -64,15 +65,11 @@ int EulerSolver::init(bool restarting, int nout, BoutReal tstep) {
   // Put starting values into f0
   save_vars(f0);
   
-  msg_stack.pop(msg_point);
-
   return 0;
 }
 
 int EulerSolver::run() {
-  int msg_point = msg_stack.push("EulerSolver::run()");
-  
-  timestep = start_timestep;
+  TRACE("EulerSolver::run()");
   
   for(int s=0;s<nsteps;s++) {
     BoutReal target = simtime + out_timestep;
@@ -127,32 +124,22 @@ int EulerSolver::run() {
       timestep = dt_limit; // Change back to limiting timestep
     }while(running);
     
+    load_vars(f0); // Put result into variables
+    // Call rhs function to get extra variables at this time
+    run_rhs(simtime);
+    
     iteration++; // Advance iteration number
-    
-    /// Write the restart file
-    restart.write();
-    
-    if((archive_restart > 0) && (iteration % archive_restart == 0)) {
-      restart.write("%s/BOUT.restart_%04d.%d.%s", restartdir.c_str(), iteration, MYPE, restartext.c_str());
-    }
     
     /// Call the monitor function
     
     if(call_monitors(simtime, s, nsteps)) {
-      // User signalled to quit
-      
-      // Write restart to a different file
-      restart.write("%s/BOUT.final.%d.%s", restartdir.c_str(), MYPE, restartext.c_str());
-      
-      output.write("Monitor signalled to quit. Returning\n");
+      // Stop simulation
       break;
     }
     
     // Reset iteration and wall-time count
     rhs_ncalls = 0;
   }
-  
-  msg_stack.pop(msg_point);
   
   return 0;
 }

@@ -1,7 +1,13 @@
 #!/usr/bin/env python
 
-from boututils import shell, launch, plotdata
-from boutdata import collect
+from __future__ import print_function
+from __future__ import division
+from builtins import str
+from builtins import range
+from past.utils import old_div
+from boututils.run_wrapper import shell, launch
+from boutdata.plotdata import plotdata
+from boutdata.collect import collect
 import numpy as np
 from sys import argv
 from math import sqrt, log, pi
@@ -26,7 +32,7 @@ elif len(argv)==3:
   end_index = int(argv[1])
   data_path = str(argv[2])
 else:
-  print "Arguments: '[end_index] [data_path]' or 'gamma [data_path]'"
+  print("Arguments: '[end_index] [data_path]' or 'gamma [data_path]'")
   Exit(1)
 
 # Collect the data
@@ -39,8 +45,8 @@ if end_index<0:
 Te_left = []
 Ti_left = []
 for i in range(end_index):
-	Te_left.append((Te[i,0,2,0]+Te[i,0,3,0])/2)
-	Ti_left.append((Ti[i,0,2,0]+Ti[i,0,3,0])/2)
+        Te_left.append(old_div((Te[i,0,2,0]+Te[i,0,3,0]),2))
+        Ti_left.append(old_div((Ti[i,0,2,0]+Ti[i,0,3,0]),2))
 
 # Make plot
 if len(argv)>2:

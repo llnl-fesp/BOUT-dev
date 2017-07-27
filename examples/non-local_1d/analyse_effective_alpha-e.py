@@ -3,8 +3,16 @@
 
 #!/usr/bin/env python
 
-from boututils import shell, launch, plotdata
-from boutdata import collect
+from __future__ import print_function
+from __future__ import division
+from builtins import str
+from builtins import range
+from past.utils import old_div
+
+from boututils.run_wrapper import shell, launch
+from boutdata.plotdata import plotdata
+from boutdata.collect import collect
+
 import numpy as np
 from sys import argv
 from math import sqrt, log, pi
@@ -29,12 +37,12 @@ elif len(argv)==3:
   end_index = int(argv[1])
   data_path = str(argv[2])
 else:
-  print "Arguments: '[end_index] [data_path]' or '[data_path]'"
+  print("Arguments: '[end_index] [data_path]' or '[data_path]'")
   Exit(1)
 
 electron_mass = 9.10938291e-31
 ion_mass =  3.34358348e-27
- 
+
 # Collect the data
 f = collect("effective_alpha_e", path=data_path, info=True)
 #Te = collect("T_electron", path=data_path, xind=2, info=True, yguards=True)
@@ -47,8 +55,8 @@ if end_index<0:
 alpha0 = 1
 alphaoveralpha0 = []
 for i in range(end_index):
-	alphaoveralpha0.append(f[i]/alpha0)
-	print i,alphaoveralpha0[i]
+        alphaoveralpha0.append(old_div(f[i],alpha0))
+        print(i,alphaoveralpha0[i])
 
 # Make plot
 pyplot.figure(1, facecolor='w')

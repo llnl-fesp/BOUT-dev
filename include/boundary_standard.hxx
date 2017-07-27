@@ -5,13 +5,15 @@
 
 #include "boundary_op.hxx"
 #include "bout_types.hxx"
+#include <field_factory.hxx>
+#include "unused.hxx"
 
-/// Dirichlet (set to zero) boundary condition
-class BoundaryDirichlet : public BoundaryOp {
+/// Dirichlet boundary condition set half way between guard cell and grid cell at 2nd order accuracy
+class BoundaryDirichlet_2ndOrder : public BoundaryOp {
  public:
-  BoundaryDirichlet() : val(0.) {}
-  BoundaryDirichlet(const BoutReal setval): val(setval) {}
-  BoundaryDirichlet(BoundaryRegion *region, BoutReal setval=0.):BoundaryOp(region),val(setval) { }
+  BoundaryDirichlet_2ndOrder() : val(0.) {}
+  BoundaryDirichlet_2ndOrder(BoutReal setval ): val(setval) {}
+  BoundaryDirichlet_2ndOrder(BoundaryRegion *region, BoutReal setval=0.):BoundaryOp(region),val(setval) { }
   BoundaryOp* clone(BoundaryRegion *region, const list<string> &args);
   void apply(Field2D &f);
   void apply(Field3D &f);
@@ -22,12 +24,81 @@ class BoundaryDirichlet : public BoundaryOp {
   BoutReal val;
 };
 
-/// Neumann (zero-gradient) boundary condition
-class BoundaryNeumann : public BoundaryOp {
+/// Dirichlet (set to zero) boundary condition
+class BoundaryDirichlet : public BoundaryOp {
  public:
-  BoundaryNeumann(): val(0.) {}
-  BoundaryNeumann(const BoutReal setval): val(setval) {}
-  BoundaryNeumann(BoundaryRegion *region, BoutReal setval=0.):BoundaryOp(region),val(setval) { }
+  BoundaryDirichlet() : gen(nullptr) {}
+  BoundaryDirichlet(BoundaryRegion *region, FieldGenerator *g) : BoundaryOp(region), gen(g) {}
+  BoundaryOp* clone(BoundaryRegion *region, const list<string> &args);
+  void apply(Field2D &f);
+  void apply(Field2D &f,BoutReal t);
+  void apply(Field3D &f);
+  void apply(Field3D &f,BoutReal t);
+
+  void apply_ddt(Field2D &f);
+  void apply_ddt(Field3D &f);
+ private:
+  FieldGenerator* gen; // Generator
+};
+
+BoutReal default_func(BoutReal t, int x, int y, int z);
+
+/// 3nd-order boundary condition
+class BoundaryDirichlet_O3 : public BoundaryOp {
+ public:
+  BoundaryDirichlet_O3() : gen(NULL) {}
+  BoundaryDirichlet_O3(BoundaryRegion *region, FieldGenerator *g) : BoundaryOp(region), gen(g) {}
+  BoundaryOp* clone(BoundaryRegion *region, const list<string> &args);
+  void apply(Field2D &f);
+  void apply(Field2D &f,BoutReal t);
+  void apply(Field3D &f);
+  void apply(Field3D &f,BoutReal t);
+
+  void apply_ddt(Field2D &f);
+  void apply_ddt(Field3D &f);
+ private:
+  FieldGenerator* gen; // Generator
+};
+
+/// 4th-order boundary condition
+class BoundaryDirichlet_O4 : public BoundaryOp {
+ public:
+  BoundaryDirichlet_O4() : gen(NULL) {}
+  BoundaryDirichlet_O4(BoundaryRegion *region, FieldGenerator *g) : BoundaryOp(region), gen(g) {}
+  BoundaryOp* clone(BoundaryRegion *region, const list<string> &args);
+  void apply(Field2D &f);
+  void apply(Field2D &f,BoutReal t);
+  void apply(Field3D &f);
+  void apply(Field3D &f,BoutReal t);
+
+  void apply_ddt(Field2D &f);
+  void apply_ddt(Field3D &f);
+ private:
+  FieldGenerator* gen; // Generator
+};
+
+/// Dirichlet boundary condition set half way between guard cell and grid cell at 4th order accuracy
+class BoundaryDirichlet_4thOrder : public BoundaryOp {
+ public:
+  BoundaryDirichlet_4thOrder() : val(0.) {}
+  BoundaryDirichlet_4thOrder(BoutReal setval ): val(setval) {}
+  BoundaryDirichlet_4thOrder(BoundaryRegion *region, BoutReal setval=0.):BoundaryOp(region),val(setval) { }
+  BoundaryOp* clone(BoundaryRegion *region, const list<string> &args);
+  void apply(Field2D &f);
+  void apply(Field3D &f);
+  
+  void apply_ddt(Field2D &f);
+  void apply_ddt(Field3D &f);
+ private:
+  BoutReal val;
+};
+
+/// Neumann (zero-gradient) boundary condition for non-orthogonal meshes
+class BoundaryNeumann_NonOrthogonal : public BoundaryOp {
+ public:
+  BoundaryNeumann_NonOrthogonal(): val(0.) {}
+  BoundaryNeumann_NonOrthogonal(BoutReal setval ): val(setval) {}
+  BoundaryNeumann_NonOrthogonal(BoundaryRegion *region, BoutReal setval=0.):BoundaryOp(region),val(setval) { }
   BoundaryOp* clone(BoundaryRegion *region, const list<string> &args);
   void apply(Field2D &f);
   void apply(Field3D &f);
@@ -43,6 +114,72 @@ class BoundaryNeumann2 : public BoundaryOp {
   BoundaryOp* clone(BoundaryRegion *region, const list<string> &args);
   void apply(Field2D &f);
   void apply(Field3D &f);
+};
+
+/// Neumann boundary condition set half way between guard cell and grid cell at 2nd order accuracy
+class BoundaryNeumann_2ndOrder : public BoundaryOp {
+ public:
+  BoundaryNeumann_2ndOrder() : val(0.) {}
+  BoundaryNeumann_2ndOrder(BoutReal setval ): val(setval) {}
+  BoundaryNeumann_2ndOrder(BoundaryRegion *region, BoutReal setval=0.):BoundaryOp(region),val(setval) { }
+  BoundaryOp* clone(BoundaryRegion *region, const list<string> &args);
+  void apply(Field2D &f);
+  void apply(Field3D &f);
+  
+  void apply_ddt(Field2D &f);
+  void apply_ddt(Field3D &f);
+ private:
+  BoutReal val;
+};
+
+// Neumann boundary condition set half way between guard cell and grid cell at 2nd order accuracy
+class BoundaryNeumann : public BoundaryOp {
+ public:
+  BoundaryNeumann() : gen(NULL) {}
+  BoundaryNeumann(BoundaryRegion *region, FieldGenerator*g):BoundaryOp(region), gen(g) {}
+  BoundaryOp* clone(BoundaryRegion *region, const list<string> &args);
+  void apply(Field2D &f);
+  void apply(Field2D &f, BoutReal t);
+  void apply(Field3D &f);
+  void apply(Field3D &f,BoutReal t);
+
+  void apply_ddt(Field2D &f);
+  void apply_ddt(Field3D &f);
+ private:
+  FieldGenerator *gen;
+};
+
+/// Neumann boundary condition set half way between guard cell and grid cell at 4th order accuracy
+class BoundaryNeumann_4thOrder : public BoundaryOp {
+ public:
+  BoundaryNeumann_4thOrder() : val(0.) {}
+  BoundaryNeumann_4thOrder(BoutReal setval ): val(setval) {}
+  BoundaryNeumann_4thOrder(BoundaryRegion *region, BoutReal setval=0.):BoundaryOp(region),val(setval) { }
+  BoundaryOp* clone(BoundaryRegion *region, const list<string> &args);
+  void apply(Field2D &f);
+  void apply(Field3D &f);
+  
+  void apply_ddt(Field2D &f);
+  void apply_ddt(Field3D &f);
+ private:
+  BoutReal val;
+};
+
+/// Neumann boundary condition set half way between guard cell and grid cell at 4th order accuracy
+class BoundaryNeumann_O4 : public BoundaryOp {
+ public:
+  BoundaryNeumann_O4() : gen(NULL) {}
+  BoundaryNeumann_O4(BoundaryRegion *region, FieldGenerator*g):BoundaryOp(region), gen(g) {}
+  BoundaryOp* clone(BoundaryRegion *region, const list<string> &args);
+  void apply(Field2D &f);
+  void apply(Field2D &f, BoutReal t);
+  void apply(Field3D &f);
+  void apply(Field3D &f,BoutReal t);
+
+  void apply_ddt(Field2D &f);
+  void apply_ddt(Field3D &f);
+ private:
+  FieldGenerator *gen;
 };
 
 /// NeumannPar (zero-gradient) boundary condition on
@@ -114,44 +251,73 @@ class BoundaryDivCurl : public BoundaryOp {
   BoundaryDivCurl() {}
   BoundaryDivCurl(BoundaryRegion *region):BoundaryOp(region) { }
   BoundaryOp* clone(BoundaryRegion *region, const list<string> &args);
-  void apply(Field2D &f) { bout_error("ERROR: DivCurl boundary only for vectors"); }
-  void apply(Field3D &f) { bout_error("ERROR: DivCurl boundary only for vectors"); }
+  void apply(Field2D &UNUSED(f)) { throw BoutException("ERROR: DivCurl boundary only for vectors"); }
+  void apply(Field3D &UNUSED(f)) { throw BoutException("ERROR: DivCurl boundary only for vectors"); }
   void apply(Vector2D &f);
   void apply(Vector3D &f);
 };
 
-/////////////////////////////////////////////////////////
-
-/// Convert a boundary condition to a relaxing one
-class BoundaryRelax : public BoundaryModifier {
+/// Free boundary condition (evolve the field in the guard cells, using non-centred derivatives to calculate the ddt)
+class BoundaryFree : public BoundaryOp {
  public:
-  BoundaryRelax() : r(10.) {}  // Set default rate
-  BoundaryRelax(BoundaryOp *operation, BoutReal rate) : BoundaryModifier(operation) {r = fabs(rate);}
-  BoundaryOp* cloneMod(BoundaryOp *op, const list<string> &args);
-  
+  BoundaryFree() : val(0.) {apply_to_ddt = true;}
+  BoundaryFree(BoutReal setval): val(setval) {}
+  BoundaryFree(BoundaryRegion *region, BoutReal setval=0.):BoundaryOp(region),val(setval) { }
+  BoundaryOp* clone(BoundaryRegion *region, const list<string> &args);
   void apply(Field2D &f);
   void apply(Field3D &f);
   
   void apply_ddt(Field2D &f);
   void apply_ddt(Field3D &f);
  private:
-  BoutReal r;
+  BoutReal val;
 };
 
-/// Apply boundary condition in shifted coordinates
-class BoundaryShifted : public BoundaryModifier {
+// L. Easy
+/// Alternative free boundary condition (evolve the field in the guard cells, using non-centred derivatives to calculate the ddt)
+class BoundaryFree_O2 : public BoundaryOp {
 public:
-  BoundaryShifted() {}
-  BoundaryShifted(BoundaryOp *operation) : BoundaryModifier(operation) {}
+ BoundaryFree_O2()  {}
+ BoundaryFree_O2(BoundaryRegion *region):BoundaryOp(region) { }
+ BoundaryOp* clone(BoundaryRegion *region, const list<string> &args);
+ void apply(Field2D &f);
+ void apply(Field3D &f);
+ void apply_ddt(Field2D &f);
+ void apply_ddt(Field3D &f);
+};
+
+class BoundaryFree_O3 : public BoundaryOp {
+public:
+ BoundaryFree_O3() {}
+ BoundaryFree_O3(BoundaryRegion *region):BoundaryOp(region) { }
+ BoundaryOp* clone(BoundaryRegion *region, const list<string> &args);
+ void apply(Field2D &f);
+ void apply(Field3D &f);
+ void apply_ddt(Field2D &f);
+ void apply_ddt(Field3D &f);
+
+};
+// End L.Easy
+
+
+/////////////////////////////////////////////////////////
+
+/// Convert a boundary condition to a relaxing one
+class BoundaryRelax : public BoundaryModifier {
+ public:
+  BoundaryRelax() : r(10.) {apply_to_ddt = true;}  // Set default rate
+  BoundaryRelax(BoundaryOp *operation, BoutReal rate) : BoundaryModifier(operation) {r = fabs(rate); apply_to_ddt = true;}
   BoundaryOp* cloneMod(BoundaryOp *op, const list<string> &args);
   
-  void apply(Field2D &f);
-  void apply(Field3D &f);
+  void apply(Field2D &f) {apply(f, 0.);};
+  void apply(Field2D &f, BoutReal t);
+  void apply(Field3D &f) {apply(f, 0.);};
+  void apply(Field3D &f, BoutReal t);
   
   void apply_ddt(Field2D &f);
   void apply_ddt(Field3D &f);
-private:
-  
+ private:
+  BoutReal r;
 };
 
 /// Increase the width of a boundary
@@ -161,13 +327,51 @@ public:
   BoundaryWidth(BoundaryOp *operation, int wid) : BoundaryModifier(operation), width(wid) {}
   BoundaryOp* cloneMod(BoundaryOp *op, const list<string> &args);
   
-  void apply(Field2D &f);
-  void apply(Field3D &f);
+  void apply(Field2D &f) {apply(f, 0.);};
+  void apply(Field2D &f, BoutReal t);
+  void apply(Field3D &f) {apply(f, 0.);};
+  void apply(Field3D &f, BoutReal t);
   
   void apply_ddt(Field2D &f);
   void apply_ddt(Field3D &f);
 private:
   int width;
+};
+
+/// Convert input field fromFieldAligned, apply boundary and then convert back toFieldAligned
+/// Equivalent to converting the boundary condition to "Field Aligned" from "orthogonal"
+class BoundaryToFieldAligned : public BoundaryModifier {
+public:
+  BoundaryToFieldAligned(){}
+  BoundaryToFieldAligned(BoundaryOp *operation) : BoundaryModifier(operation){}
+  BoundaryOp* cloneMod(BoundaryOp *op, const list<string> &args);
+
+  void apply(Field2D &f) {apply(f, 0.);};
+  void apply(Field2D &f, BoutReal t);
+  void apply(Field3D &f) {apply(f, 0.);};
+  void apply(Field3D &f, BoutReal t);
+  
+  void apply_ddt(Field2D &f);
+  void apply_ddt(Field3D &f);
+private:
+};
+
+/// Convert input field toFieldAligned, apply boundary and then convert back fromFieldAligned
+/// Equivalent to converting the boundary condition from "Field Aligned" to "orthogonal"
+class BoundaryFromFieldAligned : public BoundaryModifier {
+public:
+  BoundaryFromFieldAligned(){}
+  BoundaryFromFieldAligned(BoundaryOp *operation) : BoundaryModifier(operation){}
+  BoundaryOp* cloneMod(BoundaryOp *op, const list<string> &args);
+
+  void apply(Field2D &f) {apply(f, 0.);};
+  void apply(Field2D &f, BoutReal t);
+  void apply(Field3D &f) {apply(f, 0.);};
+  void apply(Field3D &f, BoutReal t);
+  
+  void apply_ddt(Field2D &f);
+  void apply_ddt(Field3D &f);
+private:
 };
 
 #endif // __BNDRY_STD_H__

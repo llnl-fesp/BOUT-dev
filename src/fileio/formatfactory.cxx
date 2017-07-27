@@ -5,9 +5,9 @@
 
 #include "impls/emptyformat.hxx"
 
-#include "impls/pdb/pdb_format.hxx"
 #include "impls/netcdf4/ncxx4.hxx"
 #include "impls/netcdf/nc_format.hxx"
+#include "impls/hdf5/h5_format.hxx"
 #include "impls/pnetcdf/pnetcdf.hxx"
 
 #include <boutexception.hxx>
@@ -25,34 +25,32 @@ FormatFactory* FormatFactory::getInstance() {
 }
 
 // Work out which data format to use for given filename
-DataFormat* FormatFactory::createDataFormat(const char *filename, bool parallel) {
+std::unique_ptr<DataFormat> FormatFactory::createDataFormat(const char *filename, bool parallel) {
   if((filename == NULL) || (strcasecmp(filename, "default") == 0)) {
     // Return default file format
     
 
 #ifdef PNCDF
     if(parallel)
-      return new PncFormat;
+      return std::unique_ptr<DataFormat>(new PncFormat);
 #else
 
 #ifdef NCDF4
-    return new Ncxx4;
+    return std::unique_ptr<DataFormat>(new Ncxx4);
 #else
 
 #ifdef NCDF
     //output.write("\tUsing default format (NetCDF)\n");
-    return new NcFormat;
+    return std::unique_ptr<DataFormat>(new NcFormat);
 #else
 
-#ifdef PDBF
-    //output.write("\tUsing default format (PDB)\n");
-    return new PdbFormat;
-
+#ifdef HDF5
+    return std::unique_ptr<DataFormat>(new H5Format);
 #else
 
 #error No file format available; aborting.
 
-#endif // PDBF
+#endif // HDF5
 #endif // NCDF
 #endif // NCDF4
 #endif // PNCDF
@@ -72,20 +70,12 @@ DataFormat* FormatFactory::createDataFormat(const char *filename, bool parallel)
 
   // Match strings
   
-#ifdef PDBF
-  const char *pdb_match[] = {"pdb"};
-  if(matchString(s, 1, pdb_match) != -1) {
-    output.write("\tUsing PDB format for file '%s'\n", filename);
-    return new PdbFormat;
-  }
-#endif
-
 #ifdef PNCDF
   if(parallel) {
     const char *pncdf_match[] = {"cdl", "nc", "ncdf"};
     if(matchString(s, 3, pncdf_match) != -1) {
       output.write("\tUsing Parallel NetCDF format for file '%s'\n", filename);
-    return new PncFormat;
+      return std::unique_ptr<DataFormat>(new PncFormat);
     }
   }
 #endif
@@ -94,7 +84,7 @@ DataFormat* FormatFactory::createDataFormat(const char *filename, bool parallel)
   const char *ncdf_match[] = {"cdl", "nc", "ncdf"};
   if(matchString(s, 3, ncdf_match) != -1) {
     output.write("\tUsing NetCDF4 format for file '%s'\n", filename);
-    return new Ncxx4;
+    return std::unique_ptr<DataFormat>(new Ncxx4);
   }
 #endif
 
@@ -102,26 +92,39 @@ DataFormat* FormatFactory::createDataFormat(const char *filename, bool parallel)
   const char *ncdf_match[] = {"cdl", "nc", "ncdf"};
   if(matchString(s, 3, ncdf_match) != -1) {
     output.write("\tUsing NetCDF format for file '%s'\n", filename);
-    return new NcFormat;
+    return std::unique_ptr<DataFormat>(new NcFormat);
   }
 #endif
 
-  output.write("\tFile extension not recognised for '%s'\n", filename);
-  // Set to the default
-  return createDataFormat();
+#ifdef HDF5
+  const char *hdf5_match[] = {"h5","hdf","hdf5"};
+  if(matchString(s, 3, hdf5_match) != -1) {
+    output.write("\tUsing HDF5 format for file '%s'\n", filename);
+#ifdef PHDF5
+    return std::unique_ptr<DataFormat>(new H5Format(parallel));
+#else
+    return std::unique_ptr<DataFormat>(new H5Format());
+#endif
+  }
+#endif
+
+  throw BoutException("\tFile extension not recognised for '%s'\n", filename);
+  return NULL;
 }
 
 ////////////////////// Private functions /////////////////////////////
 
 int FormatFactory::matchString(const char *str, int n, const char **match) {
-  for(int i=0;i<n;i++)
-    if(strcasecmp(str, match[i]) == 0)
+  for(int i=0;i<n;i++) {
+    if(strcasecmp(str, match[i]) == 0) {
       return i;
+    }
+  }
   return -1;
 }
 
 ////////////////////// Depreciated function ///////////////////////////
 
-DataFormat* data_format(const char *filename) {
+std::unique_ptr<DataFormat> data_format(const char *filename) {
   return FormatFactory::getInstance()->createDataFormat(filename);
 }

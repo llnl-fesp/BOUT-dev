@@ -1,9 +1,15 @@
 /*!************************************************************************
  *
- * \file bout.hxx
- * \brief File included into the physics code
+ * @mainpage BOUT++
+ * 
+ * @version 3.0
+ * 
+ * @par Description 
+ * Framework for the solution of partial differential
+ * equations, in particular fluid models in plasma physics.
  *
- * Just includes commonly needed definitions from other include files
+ * @par Include files
+ * - bout++.hxx includes commonly used routines and classes
  *
  **************************************************************************
  * Copyright 2010 B.D.Dudson, S.Farley, M.V.Umansky, X.Q.Xu
@@ -57,12 +63,61 @@
 
 #include "utils.hxx"
 
-const BoutReal BOUT_VERSION = 1.1;  ///< Version number
+const BoutReal BOUT_VERSION = 4;  ///< Version number
 
 // BOUT++ main functions
-void BoutInitialise(int &argc, char **&argv);
+
+/*!
+ * BOUT++ initialisation. This function must be
+ * called first, passing command-line arguments.
+ * 
+ * This will call MPI_Initialize, and if BOUT++
+ * has been configured with external libraries such as
+ * PETSc then these will be initialised as well.
+ * 
+ * Example
+ * -------
+ *
+ * A minimal BOUT++ program consists of:
+ *
+ *     int main(int argc, char** argv) {
+ *       BoutInitialise(argc, argv);
+ *       
+ *       BoutFinalise();
+ *     }
+ *
+ * Usually this function is called in a standard main() function,
+ * either by including boutmain.hxx or by including bout/physicsmodel.hxx
+ * and using the BOUTMAIN macro.
+ *     
+ */
+int BoutInitialise(int &argc, char **&argv);
+
+/*!
+ * Run the given solver. This function is only used
+ * for old-style physics models with standalone C functions
+ * The main() function in boutmain.hxx calls this function
+ * to set up the RHS function and add bout_monitor.
+ * 
+ */
 int bout_run(Solver *solver, rhsfunc physics_run);
+
+/*!
+ * Monitor function, called by the solver every output timestep
+ * 
+ * This is added to the solver in bout_run (for C-style models)
+ * or in bout/physicsmodel.hxx
+ */
 int bout_monitor(Solver *solver, BoutReal t, int iter, int NOUT); 
+
+/*!
+ * BOUT++ finalisation. This should be called at the
+ * end of the program.
+ *
+ * Frees memory, flushes buffers, and closes files.
+ * If BOUT++ initialised MPI or external libraries,
+ * then these are also finalised.
+ */
 int BoutFinalise();
 
 #endif // __BOUT_H__

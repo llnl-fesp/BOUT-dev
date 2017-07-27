@@ -1,3 +1,5 @@
+from __future__ import print_function
+from builtins import range
 
 import numpy as np
 from numpy import cos, sin, pi
@@ -13,7 +15,7 @@ def aligned_points(grid, nz=1, period=1.0, maxshift=0.4):
         Rxy = grid["Rxy"]
         Zxy = grid["Zxy"]
     except:
-        print "Missing required data"
+        print("Missing required data")
         return None
     
     dz = 2.*pi / (period * (nz-1))
@@ -51,12 +53,12 @@ def create_grid(grid, data, period=1):
     ny = grid["ny"]
     nz = s[2]
     
-    print "data: %d,%d,%d   grid: %d,%d\n" % (s[0],s[1],s[2], nx,ny)
+    print("data: %d,%d,%d   grid: %d,%d\n" % (s[0],s[1],s[2], nx,ny))
     
     dims = (nx, nz, ny)
     sgrid = tvtk.StructuredGrid(dimensions=dims)
     pts = aligned_points(grid, nz, period)
-    print np.shape(pts)
+    print(np.shape(pts))
     sgrid.points = pts
     
     scalar = np.zeros([nx*ny*nz])
@@ -64,7 +66,7 @@ def create_grid(grid, data, period=1):
     for y in range(ny):
         end = start + nx*nz
         scalar[start:end] = (data[:,y,:]).transpose().ravel()
-        print y, " = " , np.max(scalar[start:end])
+        print(y, " = " , np.max(scalar[start:end]))
         start = end
     
     sgrid.point_data.scalars = np.ravel(scalar.copy())
@@ -86,8 +88,8 @@ def view3d(sgrid):
     mayavi.add_module(g)
 
 if __name__ == '__main__':
-    from boutdata import collect
-    from boututils import file_import
+    from boutdata.collect import collect
+    from boututils.file_import import file_import
     
     path = "/media/449db594-b2fe-4171-9e79-2d9b76ac69b6/runs/data_33/"
     #path="/home/ben/run4"

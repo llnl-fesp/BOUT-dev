@@ -31,15 +31,29 @@ class FieldData;
 #define __FIELD_DATA_H__
 
 #include "bout_types.hxx"
+#include "bout/deprecated.hxx"
+#include "unused.hxx"
+
 #include <string>
 using std::string;
 
 // Including the next line leads to compiler errors
 //#include "boundary_op.hxx"
 class BoundaryOp;
+class BoundaryOpPar;
 
 #include <vector>
 using std::vector;
+
+#include <map>
+using std::map;
+
+#include "boundary_region.hxx"
+#include "parallel_boundary_region.hxx"
+
+class FieldGenerator; // Forward declaration
+
+class FieldVisitor;
 
 /// Interface used to access data in field classes
 /*!
@@ -47,10 +61,13 @@ using std::vector;
   to access internal data in a general way
 */
 class FieldData {
- public:
-  FieldData() : boundaryIsCopy(false), boundaryIsSet(true) {}
+public:
+  FieldData();
   virtual ~FieldData();
 
+  // Visitor pattern support
+  virtual void accept(FieldVisitor &v) = 0;
+  
   // Defines interface which must be implemented
   virtual bool isReal() const = 0; ///< Returns true if field consists of BoutReal values
   virtual bool is3D() const = 0;   ///< True if variable is 3D
@@ -58,26 +75,13 @@ class FieldData {
   virtual int byteSize() const = 0; ///< Number of bytes for a single point
   virtual int BoutRealSize() const { return 0; } ///< Number of BoutReals (not implemented if not BoutReal)
 
-  virtual int getData(int x, int y, int z, void *vptr) const = 0; ///< Return number of bytes
-  virtual int getData(int x, int y, int z, BoutReal *rptr) const = 0; ///< Return number of BoutReals
+  DEPRECATED(virtual int getData(int x, int y, int z, void *vptr) const) = 0; ///< Return number of bytes
+  DEPRECATED(virtual int getData(int x, int y, int z, BoutReal *rptr) const) = 0; ///< Return number of BoutReals
   
-  virtual int setData(int x, int y, int z, void *vptr) = 0;
-  virtual int setData(int x, int y, int z, BoutReal *rptr) = 0;
+  DEPRECATED(virtual int setData(int x, int y, int z, void *vptr)) = 0;
+  DEPRECATED(virtual int setData(int x, int y, int z, BoutReal *rptr)) = 0;
 
-  // This code for inputting/outputting to file (all optional)
-  virtual bool  ioSupport() { return false; }  ///< Return true if these functions implemented
-  virtual const string getSuffix(int component) const { return string(""); }
-  virtual void* getMark() const {return NULL;} ///< Store current settings (e.g. co/contra-variant)
-  virtual void  setMark(void *setting) {}      ///< Return to the stored settings
-  virtual BoutReal* getData(int component) { return NULL; }
-  virtual void  zeroComponent(int component) { } ///< Set a component to zero
-  
-  /// Added 20/8/2008 for twist-shifting in communication routine
-  virtual void shiftZ(int jx, int jy, double zangle) { }
-
-#ifdef CHECK
   virtual void doneComms() { }; // Notifies that communications done
-#endif
   
   // Boundary conditions
   void setBoundary(const string &name); ///< Set the boundary conditions
@@ -85,14 +89,25 @@ class FieldData {
 
   void copyBoundary(const FieldData &f); ///< Copy the boundary conditions from another field
 
-  virtual void applyBoundary() {}
+  virtual void applyBoundary(bool UNUSED(init)=false) {}
   virtual void applyTDerivBoundary() {};
- protected:
+//JMAD
+  void addBndryFunction(FuncPtr userfunc, BndryLoc location);
+  void addBndryGenerator(FieldGenerator* gen, BndryLoc location);
+  
+  FieldGenerator* getBndryGenerator(BndryLoc location);
+
+protected:
   vector<BoundaryOp*> bndry_op; // Boundary conditions
   bool boundaryIsCopy; // True if bndry_op is a copy
-  
   bool boundaryIsSet; // Set to true when setBoundary called
+  // Parallel boundaries
+  vector<BoundaryOpPar*> bndry_op_par; // Boundary conditions
+
+ std::map <BndryLoc,FieldGenerator*> bndry_generator;
 };
+
+#include "bout/field_visitor.hxx"
 
 #endif
 

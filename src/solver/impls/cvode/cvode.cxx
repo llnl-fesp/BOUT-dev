@@ -65,6 +65,8 @@ CvodeSolver::CvodeSolver(Options *opts) : Solver(opts) {
   has_constraints = false; ///< This solver doesn't have constraints
   
   jacfunc = NULL;
+  
+  canReset = true;
 }
 
 CvodeSolver::~CvodeSolver() {
@@ -78,11 +80,11 @@ CvodeSolver::~CvodeSolver() {
  * Initialise
  **************************************************************************/
 
-int CvodeSolver::init(bool restarting, int nout, BoutReal tstep) {
-  int msg_point = msg_stack.push("Initialising CVODE solver");
+int CvodeSolver::init(int nout, BoutReal tstep) {
+  TRACE("Initialising CVODE solver");
 
   /// Call the generic initialisation first
-  if(Solver::init(restarting, nout, tstep))
+  if(Solver::init(nout, tstep))
     return 1;
 
   // Save nout and tstep for use in run
@@ -95,129 +97,139 @@ int CvodeSolver::init(bool restarting, int nout, BoutReal tstep) {
   int local_N = getLocalN();
 
   // Get total problem size
-  msg_stack.push("Allreduce localN -> GlobalN");
   int neq;
-  if(MPI_Allreduce(&local_N, &neq, 1, MPI_INT, MPI_SUM, BoutComm::get())) {
-    output.write("\tERROR: MPI_Allreduce failed!\n");
-    return 1;
+  {TRACE("Allreduce localN -> GlobalN");
+    if(MPI_Allreduce(&local_N, &neq, 1, MPI_INT, MPI_SUM, BoutComm::get())) {
+      output.write("\tERROR: MPI_Allreduce failed!\n");
+      return 1;
+    }
   }
-  msg_stack.pop();
 
   output.write("\t3d fields = %d, 2d fields = %d neq=%d, local_N=%d\n",
                 n3Dvars(), n2Dvars(), neq, local_N);
 
   // Allocate memory
-
-  msg_stack.push("Allocating memory with N_VNew_Parallel");
-  if((uvec = N_VNew_Parallel(BoutComm::get(), local_N, neq)) == NULL)
-    throw BoutException("ERROR: SUNDIALS memory allocation failed\n");
-  msg_stack.pop();
+  {TRACE("Allocating memory with N_VNew_Parallel");
+    if((uvec = N_VNew_Parallel(BoutComm::get(), local_N, neq)) == NULL)
+      throw BoutException("ERROR: SUNDIALS memory allocation failed\n");
+  }
 
   // Put the variables into uvec
-  msg_stack.push("Saving variables into uvec");
-  if(save_vars(NV_DATA_P(uvec)))
-    throw BoutException("\tERROR: Initial variable value not set\n");
-  msg_stack.pop();
+  {TRACE("Saving variables into uvec");
+    save_vars(NV_DATA_P(uvec));
+  }
 
   /// Get options
-
-  msg_stack.push("Getting options");
   BoutReal abstol, reltol;
   N_Vector abstolvec;
   int maxl;
   int mudq, mldq;
   int mukeep, mlkeep;
-  bool use_precon, use_jacobian, use_vector_abstol;
+  int max_order;
+  bool use_precon, use_jacobian, use_vector_abstol, stablimdet;
   BoutReal start_timestep, max_timestep;
   bool adams_moulton, func_iter; // Time-integration method
   int MXSUB = mesh->xend - mesh->xstart + 1;
-
-  options->get("mudq", mudq, n3Dvars()*(MXSUB+2));
-  options->get("mldq", mldq, n3Dvars()*(MXSUB+2));
-  options->get("mukeep", mukeep, n3Dvars()+n2Dvars());
-  options->get("mlkeep", mlkeep, n3Dvars()+n2Dvars());
-  options->get("ATOL", abstol, 1.0e-12);
-  options->get("RTOL", reltol, 1.0e-5);
-  options->get("use_vector_abstol",use_vector_abstol,false);
-  if (use_vector_abstol) {
-    Options *abstol_options = Options::getRoot();
-    BoutReal tempabstol;
-    if((abstolvec = N_VNew_Parallel(BoutComm::get(), local_N, neq)) == NULL)
-      bout_error("ERROR: SUNDIALS memory allocation (abstol vector) failed\n");
-    vector<BoutReal> f2dtols;
-    vector<BoutReal> f3dtols;
-    BoutReal* abstolvec_data = NV_DATA_P(abstolvec);
-    for (int i=0; i<f2d.size(); i++) {
-      abstol_options = Options::getRoot()->getSection(f2d[i].name);
-      abstol_options->get("abstol", tempabstol, abstol);
-      f2dtols.push_back(tempabstol);
-    }
-    for (int i=0; i<f3d.size(); i++) {
-      abstol_options = Options::getRoot()->getSection(f3d[i].name);
-      abstol_options->get("atol", tempabstol, abstol);
-      f3dtols.push_back(tempabstol);
-    }
-    set_abstol_values(abstolvec_data, f2dtols, f3dtols);
-  }
-
-  options->get("maxl", maxl, 5);
-  OPTION(options, use_precon,   false);
-  OPTION(options, use_jacobian, false);
-  OPTION(options, max_timestep, -1.);
-  OPTION(options, start_timestep, -1);
-  OPTION(options, diagnose,     false);
-
   int mxsteps; // Maximum number of steps to take between outputs
-  options->get("mxstep", mxsteps, 500);
-
   int mxorder; // Maximum lmm order to be used by the solver
-  options->get("mxorder", mxorder, -1);
-
-  options->get("adams_moulton", adams_moulton, false);
-
   int lmm = CV_BDF;
-  if(adams_moulton) {
-    // By default use functional iteration for Adams-Moulton
-    lmm = CV_ADAMS;
-    output.write("\tUsing Adams-Moulton implicit multistep method\n");
-    options->get("func_iter", func_iter, true); 
-  }else {
-    output.write("\tUsing BDF method\n");
-    // Use Newton iteration for BDF
-    options->get("func_iter", func_iter, false); 
-  }
-
   int iter = CV_NEWTON;
-  if(func_iter)
-    iter = CV_FUNCTIONAL;
-  msg_stack.pop();
+
+  {TRACE("Getting options");
+    options->get("mudq", mudq, n3Dvars()*(MXSUB+2));
+    options->get("mldq", mldq, n3Dvars()*(MXSUB+2));
+    options->get("mukeep", mukeep, n3Dvars()+n2Dvars());
+    options->get("mlkeep", mlkeep, n3Dvars()+n2Dvars());
+    options->get("ATOL", abstol, 1.0e-12);
+    options->get("RTOL", reltol, 1.0e-5);
+    options->get("cvode_max_order", max_order, -1);
+    options->get("cvode_stability_limit_detection", stablimdet, false);
+    options->get("use_vector_abstol",use_vector_abstol,false);
+    if (use_vector_abstol) {
+      Options *abstol_options = Options::getRoot();
+      BoutReal tempabstol;
+      if((abstolvec = N_VNew_Parallel(BoutComm::get(), local_N, neq)) == NULL)
+	throw BoutException("ERROR: SUNDIALS memory allocation (abstol vector) failed\n");
+      vector<BoutReal> f2dtols;
+      vector<BoutReal> f3dtols;
+      BoutReal* abstolvec_data = NV_DATA_P(abstolvec);
+      for (const auto& f : f2d) {
+	abstol_options = Options::getRoot()->getSection(f.name);
+	abstol_options->get("abstol", tempabstol, abstol);
+	f2dtols.push_back(tempabstol);
+      }
+      for (const auto& f : f3d) {
+	abstol_options = Options::getRoot()->getSection(f.name);
+	abstol_options->get("atol", tempabstol, abstol);
+	f3dtols.push_back(tempabstol);
+      }
+      set_abstol_values(abstolvec_data, f2dtols, f3dtols);
+    }
+
+    options->get("maxl", maxl, 5);
+    OPTION(options, use_precon,   false);
+    OPTION(options, use_jacobian, false);
+    OPTION(options, max_timestep, -1.);
+    OPTION(options, start_timestep, -1);
+    OPTION(options, diagnose,     false);
+
+    options->get("mxstep", mxsteps, 500);
+    options->get("mxorder", mxorder, -1);
+    options->get("adams_moulton", adams_moulton, false);
+
+    if(adams_moulton) {
+      // By default use functional iteration for Adams-Moulton
+      lmm = CV_ADAMS;
+      output.write("\tUsing Adams-Moulton implicit multistep method\n");
+      options->get("func_iter", func_iter, true); 
+    }else {
+      output.write("\tUsing BDF method\n");
+      // Use Newton iteration for BDF
+      options->get("func_iter", func_iter, false); 
+    }
+
+    if(func_iter)
+      iter = CV_FUNCTIONAL;
+  }//End of options TRACE
 
   // Call CVodeCreate
-  msg_stack.push("Calling CVodeCreate");
-  if((cvode_mem = CVodeCreate(lmm, iter)) == NULL)
-    throw BoutException("CVodeCreate failed\n");
-  msg_stack.pop();
+  {TRACE("Calling CVodeCreate");
+    if((cvode_mem = CVodeCreate(lmm, iter)) == NULL)
+      throw BoutException("CVodeCreate failed\n");
+  }
 
-  msg_stack.push("Calling CVodeSetUserData");
-  if( CVodeSetUserData(cvode_mem, this) < 0 ) // For callbacks, need pointer to solver object
-    throw BoutException("CVodeSetUserData failed\n");
-  msg_stack.pop();
+  {TRACE("Calling CVodeSetUserData");
+    if( CVodeSetUserData(cvode_mem, this) < 0 ) // For callbacks, need pointer to solver object
+      throw BoutException("CVodeSetUserData failed\n");
+  }
 
-  msg_stack.push("Calling CVodeInit");
-  if( CVodeInit(cvode_mem, cvode_rhs, simtime, uvec) < 0 )
-    throw BoutException("CVodeInit failed\n");
-  msg_stack.pop();
+  {TRACE("Calling CVodeInit");
+    if( CVodeInit(cvode_mem, cvode_rhs, simtime, uvec) < 0 )
+      throw BoutException("CVodeInit failed\n");
+  }
 
+  
+  if (max_order>0) {
+    TRACE("Calling CVodeSetMaxOrder");
+    if ( CVodeSetMaxOrd(cvode_mem, max_order) < 0)
+      throw BoutException("CVodeSetMaxOrder failed\n");
+  }
+   
+  if (stablimdet) {
+    TRACE("Calling CVodeSetstabLimDet");
+    if ( CVodeSetStabLimDet(cvode_mem, stablimdet) < 0)
+      throw BoutException("CVodeSetstabLimDet failed\n");
+  }
+  
   if (use_vector_abstol) {
-    msg_stack.push("Calling CVodeSStolerances");
+    TRACE("Calling CVodeSVtolerances");
     if( CVodeSVtolerances(cvode_mem, reltol, abstolvec) < 0 )
       throw BoutException("CVodeSStolerances failed\n");
-  msg_stack.pop();
   }
   else {
+    TRACE("Calling CVodeSStolerances");
     if( CVodeSStolerances(cvode_mem, reltol, abstol) < 0 )
       throw BoutException("CVodeSStolerances failed\n");
-    msg_stack.pop();
   }
 
   CVodeSetMaxNumSteps(cvode_mem, mxsteps);
@@ -245,7 +257,7 @@ int CvodeSolver::init(bool restarting, int nout, BoutReal tstep) {
   if(!func_iter) {
     output.write("\tUsing Newton iteration\n");
     /// Set Preconditioner
-    msg_stack.push("Setting preconditioner");
+    TRACE("Setting preconditioner");
     if(use_precon) {
 
       int prectype = PREC_LEFT;
@@ -255,20 +267,20 @@ int CvodeSolver::init(bool restarting, int nout, BoutReal tstep) {
         prectype = PREC_RIGHT;
       
       if( CVSpgmr(cvode_mem, prectype, maxl) != CVSPILS_SUCCESS )
-        bout_error("ERROR: CVSpgmr failed\n");
+        throw BoutException("ERROR: CVSpgmr failed\n");
 
       if(!have_user_precon()) {
         output.write("\tUsing BBD preconditioner\n");
 
         if( CVBBDPrecInit(cvode_mem, local_N, mudq, mldq, 
               mukeep, mlkeep, ZERO, cvode_bbd_rhs, NULL) )
-          bout_error("ERROR: CVBBDPrecInit failed\n");
+          throw BoutException("ERROR: CVBBDPrecInit failed\n");
 
       } else {
         output.write("\tUsing user-supplied preconditioner\n");
 
         if( CVSpilsSetPreconditioner(cvode_mem, NULL, cvode_pre) )
-          bout_error("ERROR: CVSpilsSetPreconditioner failed\n");
+          throw BoutException("ERROR: CVSpilsSetPreconditioner failed\n");
       }
     }else {
       // Not using preconditioning
@@ -276,29 +288,22 @@ int CvodeSolver::init(bool restarting, int nout, BoutReal tstep) {
       output.write("\tNo preconditioning\n");
 
       if( CVSpgmr(cvode_mem, PREC_NONE, maxl) != CVSPILS_SUCCESS )
-        bout_error("ERROR: CVSpgmr failed\n");
+        throw BoutException("ERROR: CVSpgmr failed\n");
     }
-    msg_stack.pop();
 
     /// Set Jacobian-vector multiplication function
 
     if((use_jacobian) && (jacfunc != NULL)) {
       output.write("\tUsing user-supplied Jacobian function\n");
 
-      msg_stack.push("Setting Jacobian-vector multiply");
+      TRACE("Setting Jacobian-vector multiply");
       if( CVSpilsSetJacTimesVecFn(cvode_mem, cvode_jac) != CVSPILS_SUCCESS )
-        bout_error("ERROR: CVSpilsSetJacTimesVecFn failed\n");
-
-      msg_stack.pop();
+        throw BoutException("ERROR: CVSpilsSetJacTimesVecFn failed\n");
     }else
       output.write("\tUsing difference quotient approximation for Jacobian\n");
   }else {
     output.write("\tUsing Functional iteration\n");
   }
-
-#ifdef CHECK
-  msg_stack.pop(msg_point);
-#endif
 
   return 0;
 }
@@ -309,9 +314,7 @@ int CvodeSolver::init(bool restarting, int nout, BoutReal tstep) {
  **************************************************************************/
 
 int CvodeSolver::run() {
-#ifdef CHECK
-  int msg_point = msg_stack.push("CvodeSolver::run()");
-#endif
+  TRACE("CvodeSolver::run()");
 
   if(!initialised)
     throw BoutException("CvodeSolver not initialised\n");
@@ -326,20 +329,10 @@ int CvodeSolver::run() {
     if(simtime < 0.0) {
       // Step failed
       output.write("Timestep failed. Aborting\n");
-
-      // Write restart to a different file
-      restart.write("%s/BOUT.final.%s", restartdir.c_str(), restartext.c_str());
-
+      
       throw BoutException("SUNDIALS timestep failed\n");
     }
-
-    /// Write the restart file
-    restart.write();
-
-    if((archive_restart > 0) && (iteration % archive_restart == 0)) {
-      restart.write("%s/BOUT.restart_%04d.%s", restartdir.c_str(), iteration, restartext.c_str());
-    }
-
+    
     if(diagnose) {
       // Print additional diagnostics
       long int nsteps, nfevals, nniters, npevals, nliters;
@@ -347,7 +340,7 @@ int CvodeSolver::run() {
       CVodeGetNumSteps(cvode_mem, &nsteps);
       CVodeGetNumRhsEvals(cvode_mem, &nfevals);
       CVodeGetNumNonlinSolvIters(cvode_mem, &nniters);
-      CVSpilsGetNumPrecEvals(cvode_mem, &npevals);
+      CVSpilsGetNumPrecSolves(cvode_mem, &npevals);
       CVSpilsGetNumLinIters(cvode_mem, &nliters);
 
       output.write("\nCVODE: nsteps %ld, nfevals %ld, nniters %ld, npevals %ld, nliters %ld\n", 
@@ -359,32 +352,49 @@ int CvodeSolver::run() {
                    ((double) nliters) / ((double) nniters));
       output.write("    -> Preconditioner evaluations per Newton: %e\n",
                    ((double) npevals) / ((double) nniters));
+
+
+      // Last step size
+      BoutReal last_step;
+      CVodeGetLastStep(cvode_mem, &last_step);
+
+      // Order used in last step
+      int last_order;
+      CVodeGetLastOrder(cvode_mem, &last_order);
+
+      output.write("    -> Last step size: %e, order: %d\n", last_step, last_order);
+      
+      // Local error test failures
+      long int num_fails;
+      CVodeGetNumErrTestFails(cvode_mem, &num_fails);
+
+      // Number of nonlinear convergence failures
+      long int nonlin_fails;
+      CVodeGetNumNonlinSolvConvFails(cvode_mem, &nonlin_fails);
+      
+      output.write("    -> Local error fails: %d, nonlinear convergence fails: %d\n", num_fails, nonlin_fails);
+
+      // Stability limit order reductions
+      long int stab_lims;
+      CVodeGetNumStabLimOrderReds(cvode_mem, &stab_lims);
+      
+      output.write("    -> Stability limit order reductions: %d\n", stab_lims);
+      
     }
 
     /// Call the monitor function
 
     if(call_monitors(simtime, i, NOUT)) {
       // User signalled to quit
-
-      // Write restart to a different file
-      restart.write("%s/BOUT.final.%s", restartdir.c_str(), restartext.c_str());
-
-      output.write("Monitor signalled to quit. Returning\n");
       break;
     }
   }
-
-#ifdef CHECK
-  msg_stack.pop(msg_point);
-#endif
 
   return 0;
 }
 
 BoutReal CvodeSolver::run(BoutReal tout) {
-#ifdef CHECK
-  int msg_point = msg_stack.push("Running solver: solver::run(%e)", tout);
-#endif
+  TRACE("Running solver: solver::run(%e)", tout);
 
   MPI_Barrier(BoutComm::get());
   
@@ -430,10 +440,6 @@ BoutReal CvodeSolver::run(BoutReal tout) {
     return -1.0;
   }
 
-#ifdef CHECK
-  msg_stack.pop(msg_point);
-#endif
-
   return simtime;
 }
 
@@ -442,9 +448,7 @@ BoutReal CvodeSolver::run(BoutReal tout) {
  **************************************************************************/
 
 void CvodeSolver::rhs(BoutReal t, BoutReal *udata, BoutReal *dudata) {
-#ifdef CHECK
-  int msg_point = msg_stack.push("Running RHS: CvodeSolver::res(%e)", t);
-#endif
+  TRACE("Running RHS: CvodeSolver::res(%e)", t);
 
   // Load state from udata
   load_vars(udata);
@@ -458,10 +462,6 @@ void CvodeSolver::rhs(BoutReal t, BoutReal *udata, BoutReal *dudata) {
 
   // Save derivatives to dudata
   save_derivs(dudata);
-
-#ifdef CHECK
-  msg_stack.pop(msg_point);
-#endif
 }
 
 /**************************************************************************
@@ -469,9 +469,7 @@ void CvodeSolver::rhs(BoutReal t, BoutReal *udata, BoutReal *dudata) {
  **************************************************************************/
 
 void CvodeSolver::pre(BoutReal t, BoutReal gamma, BoutReal delta, BoutReal *udata, BoutReal *rvec, BoutReal *zvec) {
-#ifdef CHECK
-  int msg_point = msg_stack.push("Running preconditioner: CvodeSolver::pre(%e)", t);
-#endif
+  TRACE("Running preconditioner: CvodeSolver::pre(%e)", t);
 
   BoutReal tstart = MPI_Wtime();
 
@@ -497,10 +495,6 @@ void CvodeSolver::pre(BoutReal t, BoutReal gamma, BoutReal delta, BoutReal *udat
 
   pre_Wtime += MPI_Wtime() - tstart;
   pre_ncalls++;
-
-#ifdef CHECK
-  msg_stack.pop(msg_point);
-#endif
 }
 
 /**************************************************************************
@@ -508,12 +502,10 @@ void CvodeSolver::pre(BoutReal t, BoutReal gamma, BoutReal delta, BoutReal *udat
  **************************************************************************/
 
 void CvodeSolver::jac(BoutReal t, BoutReal *ydata, BoutReal *vdata, BoutReal *Jvdata) {
-#ifdef CHECK
-  int msg_point = msg_stack.push("Running Jacobian: CvodeSolver::jac(%e)", t);
-#endif
+  TRACE("Running Jacobian: CvodeSolver::jac(%e)", t);
   
   if(jacfunc == NULL)
-    bout_error("ERROR: No jacobian function supplied!\n");
+    throw BoutException("ERROR: No jacobian function supplied!\n");
   
   // Load state from ydate
   load_vars(ydata);
@@ -526,10 +518,6 @@ void CvodeSolver::jac(BoutReal t, BoutReal *ydata, BoutReal *vdata, BoutReal *Jv
 
   // Save Jv from vars
   save_derivs(Jvdata);
-
-#ifdef CHECK
-  msg_stack.pop(msg_point);
-#endif
 }
 
 /**************************************************************************
@@ -546,7 +534,6 @@ static int cvode_rhs(BoutReal t,
   CvodeSolver *s = (CvodeSolver*) user_data;
   
   // Calculate RHS function
-  int rhs_status = 0;
   try {
     s->rhs(t, udata, dudata);
   }
@@ -612,49 +599,63 @@ void CvodeSolver::set_abstol_values(BoutReal* abstolvec_data, vector<BoutReal> &
   if(mesh->firstX() && !mesh->periodicX) {
     for(jx=0;jx<mesh->xstart;jx++)
       for(jy=0;jy<MYSUB;jy++)
-	loop_abstol_values_op(jx, jy+mesh->ystart, abstolvec_data, p, f2dtols, f3dtols);
+	loop_abstol_values_op(jx, jy+mesh->ystart, abstolvec_data, p, f2dtols, f3dtols, true);
   }
 
   // Lower Y boundary region
   for(RangeIterator xi = mesh->iterateBndryLowerY(); !xi.isDone(); xi++) {
     for(jy=0;jy<mesh->ystart;jy++)
-      loop_abstol_values_op(*xi, jy, abstolvec_data, p, f2dtols, f3dtols);
+      loop_abstol_values_op(*xi, jy, abstolvec_data, p, f2dtols, f3dtols, true);
   }
 
   // Bulk of points
   for (jx=mesh->xstart; jx <= mesh->xend; jx++)
     for (jy=mesh->ystart; jy <= mesh->yend; jy++)
-      loop_abstol_values_op(jx, jy, abstolvec_data, p, f2dtols, f3dtols);
+      loop_abstol_values_op(jx, jy, abstolvec_data, p, f2dtols, f3dtols, false);
   
   // Upper Y boundary condition
   for(RangeIterator xi = mesh->iterateBndryUpperY(); !xi.isDone(); xi++) {
-    for(jy=mesh->yend+1;jy<mesh->ngy;jy++)
-      loop_abstol_values_op(*xi, jy, abstolvec_data, p, f2dtols, f3dtols);
+    for(jy=mesh->yend+1;jy<mesh->LocalNy;jy++)
+      loop_abstol_values_op(*xi, jy, abstolvec_data, p, f2dtols, f3dtols, true);
   }
 
   // Outer X boundary
   if(mesh->lastX() && !mesh->periodicX) {
-    for(jx=mesh->xend+1;jx<mesh->ngx;jx++)
+    for(jx=mesh->xend+1;jx<mesh->LocalNx;jx++)
       for(jy=mesh->ystart;jy<=mesh->yend;jy++)
-	loop_abstol_values_op(jx, jy, abstolvec_data, p, f2dtols, f3dtols);
+	loop_abstol_values_op(jx, jy, abstolvec_data, p, f2dtols, f3dtols, true);
   }
 }
 
-void CvodeSolver::loop_abstol_values_op(int jx, int jy, BoutReal* abstolvec_data, int &p, vector<BoutReal> &f2dtols, vector<BoutReal> &f3dtols) {
+void CvodeSolver::loop_abstol_values_op(int jx, int jy, BoutReal* abstolvec_data, int &p, vector<BoutReal> &f2dtols, vector<BoutReal> &f3dtols, bool bndry) {
   // Loop over 2D variables
-  for(int i=0;i<f2dtols.size();i++) {
+  for(vector<BoutReal>::size_type i=0; i<f2dtols.size(); i++) {
+    if(bndry && !f2d[i].evolve_bndry) {
+      continue;
+    }
     abstolvec_data[p] = f2dtols[i];
     p++;
   }
   
-  for (int jz=0; jz < mesh->ngz-1; jz++) {
-    
+  for (int jz=0; jz < mesh->LocalNz; jz++) {
     // Loop over 3D variables
-    for(int i=0;i<f3dtols.size();i++) {
+    for(vector<BoutReal>::size_type i=0; i<f3dtols.size(); i++) {
+      if(bndry && !f3d[i].evolve_bndry) {
+        continue;
+      }
       abstolvec_data[p] = f3dtols[i];
       p++;
     }  
   }
+}
+
+void CvodeSolver::resetInternalFields() {
+  TRACE("CvodeSolver::resetInternalFields");
+  save_vars(NV_DATA_P(uvec));
+  
+  if ( CVodeReInit(cvode_mem, simtime, uvec) < 0 )
+    throw BoutException("CVodeReInit failed\n");
+  
 }
 
 #endif

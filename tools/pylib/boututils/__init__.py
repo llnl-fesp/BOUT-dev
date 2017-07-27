@@ -1,59 +1,34 @@
-##################################################
-#            Data utilities package
-#
-# Generic routines, useful for all data
-##################################################
+""" Generic routines, useful for all data """
 
-print("Loading data utilities")
+import sys
 
-# Load routines from separate files
-#try:
-#    from showdata import showdata
-#except:
-#    print "No showdata"
+# Modules to be imported independent of version
+for_all_versions = [\
+                    'calculus',\
+                    'closest_line',\
+                    'datafile',\
+                    # 'efit_analyzer',\ # bunch pkg required
+                    'fft_deriv',\
+                    'fft_integrate',\
+                    'file_import',\
+                    'int_func',\
+                    'linear_regression',\
+                    'mode_structure',\
+                    # 'moment_xyzt',\   # bunch pkg requried
+                    'run_wrapper',\
+                    'shell',\
+                    'showdata',\
+                    # 'surface_average',\
+                    # 'volume_integral',\ #bunch pkg required
+                    ]
 
-#try:
-#    from plotdata import plotdata
-#except:
-#    print "No plotdata"
-
-try:
-    from datafile import DataFile
-except:
-    print("No datafile")
-
-try:
-    from file_import import file_import
-except:
-    print("No file_import")
-
-try:
-    from calculus import deriv, integrate
-except:
-    print("No calculus")
-
-try:
-    from linear_regression import linear_regression
-except:
-    print("No linear regression")
-
-try:
-    from shell import shell
-except:
-    print("No shell commands")
-
-try:
-    from ncpus import determineNumberOfCPUs
-except:
-    print("No determineNumberOfCPUs")
-
-try:
-    from launch import launch
-except:
-    print("No launch command")
-
-try:
-    from getmpirun import getmpirun
-except:
-    print("No getmpirun command")
- 
+# Check the current python version
+if sys.version_info[0]>=3:
+    do_import = for_all_versions
+    __all__ = do_import
+else:
+    do_import = for_all_versions
+    do_import.append('anim')
+    do_import.append('plotpolslice')
+    do_import.append('View3D')
+    __all__ = do_import

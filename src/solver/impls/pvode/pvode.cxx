@@ -45,9 +45,6 @@ void solver_cfn(integer N, BoutReal t, N_Vector u, void *f_data);
 
 const BoutReal ZERO = 0.0;
 
-static BoutReal abstol, reltol; // addresses passed in init must be preserved
-static PVBBDData pdata;
-
 long int iopt[OPT_SIZE];
 BoutReal ropt[OPT_SIZE];
 
@@ -55,8 +52,7 @@ PvodeSolver::PvodeSolver(Options *options) : Solver(options) {
   has_constraints = false; ///< This solver doesn't have constraints
 }
 
-PvodeSolver::~PvodeSolver()
-{
+PvodeSolver::~PvodeSolver() {
   if(initialised) {
     // Free CVODE memory
     
@@ -71,7 +67,9 @@ PvodeSolver::~PvodeSolver()
  * Initialise
  **************************************************************************/
 
-int PvodeSolver::init(bool restarting, int nout, BoutReal tstep) {
+int PvodeSolver::init(int nout, BoutReal tstep) {
+  TRACE("Initialising PVODE solver");
+
   int mudq, mldq, mukeep, mlkeep;
   boole optIn;
   int i;
@@ -82,10 +80,8 @@ int PvodeSolver::init(bool restarting, int nout, BoutReal tstep) {
   int n2d = n2Dvars(); // Number of 2D variables
   int n3d = n3Dvars(); // Number of 3D variables
 
-  int msg_point = msg_stack.push("Initialising PVODE solver");
-
   /// Call the generic initialisation first
-  if(Solver::init(restarting, nout, tstep))
+  if(Solver::init(nout, tstep))
     return 1;
   
   // Save nout and tstep for use in run
@@ -95,6 +91,10 @@ int PvodeSolver::init(bool restarting, int nout, BoutReal tstep) {
   output.write("Initialising PVODE solver\n");
 
   int local_N = getLocalN();
+
+  if(local_N == 0) {
+    throw BoutException("No local evolving variables");
+  }
   
   // Get total problem size
   int neq;
@@ -143,9 +143,7 @@ int PvodeSolver::init(bool restarting, int nout, BoutReal tstep) {
 
   // Set pointer to data array in vector u.
   BoutReal *udata = N_VDATA(u);
-  if(save_vars(udata)) {
-    throw BoutException("\tError: Initial variable value not set\n");
-  }
+  save_vars(udata);
   
   /* Call CVodeMalloc to initialize CVODE: 
      
@@ -189,8 +187,6 @@ int PvodeSolver::init(bool restarting, int nout, BoutReal tstep) {
 
   /*  CVSpgmr(cvode_mem, NONE, MODIFIED_GS, 10, 0.0, PVBBDPrecon, PVBBDPSol, pdata); */
   
-  msg_stack.pop(msg_point);
-  
   return(0);
 }
 
@@ -199,12 +195,10 @@ int PvodeSolver::init(bool restarting, int nout, BoutReal tstep) {
  **************************************************************************/
 
 int PvodeSolver::run() {
-#ifdef CHECK
-  int msg_point = msg_stack.push("PvodeSolver::run()");
-#endif
+  TRACE("PvodeSolver::run()");
   
   if(!initialised)
-    bout_error("PvodeSolver not initialised\n");
+    throw BoutException("PvodeSolver not initialised\n");
   
   for(int i=0;i<NOUT;i++) {
     
@@ -216,46 +210,25 @@ int PvodeSolver::run() {
     if(simtime < 0.0) {
       // Step failed
       output.write("Timestep failed. Aborting\n");
-
-      // Write restart to a different file
-      restart.write("%s/BOUT.failed.%s", restartdir.c_str(), restartext.c_str());
-
-      bout_error("PVODE timestep failed\n");
-    }
-
-    /// Write the restart file
-    restart.write();
-    
-    if((archive_restart > 0) && (iteration % archive_restart == 0)) {
-      restart.write("%s/BOUT.restart_%04d.%s", restartdir.c_str(), iteration, restartext.c_str());
+      
+      throw BoutException("PVODE timestep failed\n");
     }
     
     /// Call the monitor function
     
     if(call_monitors(simtime, i, NOUT)) {
       // User signalled to quit
-      
-      // Write restart to a different file
-      restart.write("%s/BOUT.final.%s", restartdir.c_str(), restartext.c_str());
-      
-      output.write("Monitor signalled to quit. Returning\n");
       break;
     }
   }
   
-#ifdef CHECK
-  msg_stack.pop(msg_point);
-#endif
-
   return 0;
 }
 
 BoutReal PvodeSolver::run(BoutReal tout) {
-  BoutReal *udata;
+  TRACE("Running solver: solver::run(%e)", tout);
 
-#ifdef CHECK
-  int msg_point = msg_stack.push("Running solver: solver::run(%e)", tout);
-#endif
+  BoutReal *udata;
   
   rhs_ncalls = 0;
 
@@ -301,10 +274,6 @@ BoutReal PvodeSolver::run(BoutReal tout) {
     return(-1.0);
   }
 
-#ifdef CHECK
-  msg_stack.pop(msg_point);
-#endif
-
   return simtime;
 }
 
@@ -313,9 +282,7 @@ BoutReal PvodeSolver::run(BoutReal tout) {
  **************************************************************************/
 
 void PvodeSolver::rhs(int N, BoutReal t, BoutReal *udata, BoutReal *dudata) {
-#ifdef CHECK
-  int msg_point = msg_stack.push("Running RHS: PvodeSolver::rhs(%e)", t);
-#endif
+  TRACE("Running RHS: PvodeSolver::rhs(%e)", t);
 
   // Get current timestep
   hcur = 0.0; //((CVodeMemRec*) cvode_mem)->cv_h;
@@ -324,20 +291,14 @@ void PvodeSolver::rhs(int N, BoutReal t, BoutReal *udata, BoutReal *dudata) {
   load_vars(udata);
 
   // Call function
-  int flag = run_rhs(t);
+  run_rhs(t);
 
   // Save derivatives to CVODE
   save_derivs(dudata);
-
-#ifdef CHECK
-  msg_stack.pop(msg_point);
-#endif
 }
 
 void PvodeSolver::gloc(int N, BoutReal t, BoutReal *udata, BoutReal *dudata) {
-#ifdef CHECK
-  int msg_point = msg_stack.push("Running RHS: PvodeSolver::gloc(%e)", t);
-#endif
+  TRACE("Running RHS: PvodeSolver::gloc(%e)", t);
 
   Timer timer("rhs");
 
@@ -345,16 +306,12 @@ void PvodeSolver::gloc(int N, BoutReal t, BoutReal *udata, BoutReal *dudata) {
   load_vars(udata);
 
   // Call function
-  int flag = run_rhs(t);
+  run_rhs(t);
 
   // Save derivatives to CVODE
   save_derivs(dudata);
   
   rhs_ncalls++;
-
-#ifdef CHECK
-  msg_stack.pop(msg_point);
-#endif
 }
 
 /**************************************************************************

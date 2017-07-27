@@ -1,27 +1,17 @@
 
 #include <bout/fieldgroup.hxx>
 
-FieldGroup::FieldGroup(FieldData &f) {
-  fvec.push_back(&f);
+FieldGroup operator+(const FieldGroup &lhs, const FieldGroup &rhs) {
+  return FieldGroup(lhs) += rhs;
 }
 
-FieldGroup::FieldGroup(FieldData &f1, FieldData &f2) {
-  fvec.push_back(&f1); fvec.push_back(&f2);
-}
-
-FieldGroup::FieldGroup(FieldData &f1, FieldData &f2, FieldData &f3) {
-  fvec.push_back(&f1); fvec.push_back(&f2); fvec.push_back(&f3);
-}
-
-FieldGroup::FieldGroup(FieldData &f1, FieldData &f2, FieldData &f3, FieldData &f4) {
-  fvec.push_back(&f1); fvec.push_back(&f2); fvec.push_back(&f3); fvec.push_back(&f4);
-}
-
-FieldGroup::FieldGroup(FieldData &f1, FieldData &f2, FieldData &f3, FieldData &f4, FieldData &f5) {
-  fvec.push_back(&f1); fvec.push_back(&f2); fvec.push_back(&f3); fvec.push_back(&f4); fvec.push_back(&f5);
-}
-
-FieldGroup::FieldGroup(FieldData &f1, FieldData &f2, FieldData &f3, FieldData &f4, FieldData &f5, FieldData &f6) {
-  fvec.push_back(&f1); fvec.push_back(&f2); fvec.push_back(&f3); fvec.push_back(&f4);
-  fvec.push_back(&f5); fvec.push_back(&f6);
+void FieldGroup::makeUnique(){
+  //Need to sort vector before making unique
+  std::sort(fvec.begin(), fvec.end());
+  //Remove duplicate entries (doesn't resize vector though)
+  //auto last = std::unique(fvec.begin(), fvec.end());
+  //Nicer to do the above but can't use auto until we have c++11 by default
+  vector<FieldData*>::iterator last = std::unique(fvec.begin(), fvec.end());
+  //Resizes vector to remove memory no longer required
+  fvec.erase(last, fvec.end());
 }

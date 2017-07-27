@@ -10,12 +10,12 @@
 
 #include <output.hxx>
 
-RK3SSP::RK3SSP(Options *opt) : Solver(opt), f(0) {
+RK3SSP::RK3SSP(Options *opt) : Solver(opt), f(nullptr) {
   
 }
 
 RK3SSP::~RK3SSP() {
-  if(f != 0) {
+  if(f != nullptr) {
     delete[] f;
     
     delete[] u1;
@@ -32,12 +32,12 @@ void RK3SSP::setMaxTimestep(BoutReal dt) {
   timestep = dt; // Won't be used this time, but next
 }
 
-int RK3SSP::init(bool restarting, int nout, BoutReal tstep) {
+int RK3SSP::init(int nout, BoutReal tstep) {
 
-  int msg_point = msg_stack.push("Initialising RK3 SSP solver");
+  TRACE("Initialising RK3 SSP solver");
   
   /// Call the generic initialisation first
-  if(Solver::init(restarting, nout, tstep))
+  if (Solver::init(nout, tstep))
     return 1;
   
   output << "\n\tRunge-Kutta 3rd-order SSP solver\n";
@@ -76,20 +76,17 @@ int RK3SSP::init(bool restarting, int nout, BoutReal tstep) {
   OPTION(options, timestep, max_timestep); // Starting timestep
   OPTION(options, mxstep, 500); // Maximum number of steps between outputs
 
-  msg_stack.pop(msg_point);
-
   return 0;
 }
 
 int RK3SSP::run() {
-  int msg_point = msg_stack.push("RK3SSP::run()");
+  TRACE("RK3SSP::run()");
   
   for(int s=0;s<nsteps;s++) {
     BoutReal target = simtime + out_timestep;
     
     BoutReal dt;
     bool running = true;
-    int internal_steps = 0;
     do {
       // Take a single time step
       
@@ -99,7 +96,7 @@ int RK3SSP::run() {
         dt = target - simtime; // Make sure the last timestep is on the output 
         running = false;
       }
-        
+      output.write("t = %e, dt = %e\n", simtime, dt);
       // No adaptive timestepping for now
       take_step(simtime, dt, f, f);
       
@@ -108,32 +105,22 @@ int RK3SSP::run() {
       call_timestep_monitors(simtime, dt);
     }while(running);
     
+    load_vars(f); // Put result into variables
+    // Call rhs function to get extra variables at this time
+    run_rhs(simtime);
+ 
     iteration++; // Advance iteration number
-    
-    /// Write the restart file
-    restart.write();
-    
-    if((archive_restart > 0) && (iteration % archive_restart == 0)) {
-      restart.write("%s/BOUT.restart_%04d.%s", restartdir.c_str(), iteration, restartext.c_str());
-    }
     
     /// Call the monitor function
     
     if(call_monitors(simtime, s, nsteps)) {
       // User signalled to quit
-      
-      // Write restart to a different file
-      restart.write("%s/BOUT.final.%s", restartdir.c_str(), restartext.c_str());
-      
-      output.write("Monitor signalled to quit. Returning\n");
       break;
     }
     
     // Reset iteration and wall-time count
     rhs_ncalls = 0;
   }
-  
-  msg_stack.pop(msg_point);
   
   return 0;
 }

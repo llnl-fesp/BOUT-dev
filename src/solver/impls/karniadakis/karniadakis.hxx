@@ -42,14 +42,16 @@ class KarniadakisSolver;
 
 class KarniadakisSolver : public Solver {
  public:
-  KarniadakisSolver();
+  KarniadakisSolver(Options *options);
   ~KarniadakisSolver();
 
   BoutReal getCurrentTimestep() {return timestep; }
 
-  int init(bool restarting, int nout, BoutReal tstep);
+  int init(int nout, BoutReal tstep) override;
   
-  int run();
+  int run() override;
+  void resetInternalFields();
+
  private:
   
   BoutReal *f1, *f0, *fm1, *fm2; // System state at current, and two previous time points

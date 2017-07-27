@@ -8,12 +8,10 @@
 #include <boutexception.hxx>
 
 #include "impls/bout/boutmesh.hxx"
-//#include "impls/quilt/quiltmesh.hxx"
 
 MeshFactory *MeshFactory::instance = NULL;
 
 #define MESH_BOUT  "bout"
-//#define MESH_QUILT "quilt"
 
 MeshFactory* MeshFactory::getInstance() {
   if(instance == NULL) {
@@ -55,19 +53,14 @@ Mesh* MeshFactory::createMesh(GridDataSource *source, Options *options) {
       source = (GridDataSource*) new GridFromOptions(options);
     }
   }
-  
-  if(!source->isValid())
-    throw BoutException("Invalid data source. Maybe the wrong grid file name?");
 
   // Get the type of mesh
   string type;
   options->get("type", type, MESH_BOUT);
   
-/*
-  if(!strcasecmp(type.c_str(), MESH_QUILT)) {
-    return new QuiltMesh(source, options);
+  if(!strcasecmp(type.c_str(), MESH_BOUT)) {
+    return new BoutMesh(source, options);
   }
-*/
-  
-  return new BoutMesh(source, options);
+
+  throw BoutException("Mesh type not implemented: %s",type.c_str());
 }

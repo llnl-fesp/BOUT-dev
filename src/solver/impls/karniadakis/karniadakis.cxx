@@ -42,23 +42,33 @@
 #include <msg_stack.hxx>
 #include <output.hxx>
 
-KarniadakisSolver::KarniadakisSolver() : Solver() {
-  
+KarniadakisSolver::KarniadakisSolver(Options *options) : Solver(options), f1(nullptr) {
+  canReset = true;  
 }
 
 KarniadakisSolver::~KarniadakisSolver() {
-  
+  if(f1 != nullptr){
+    delete[] f1;
+    delete[] f0;
+    delete[] fm1;
+    delete[] fm2;
+    
+    delete[] S0;
+    delete[] Sm1;
+    delete[] Sm2;
+    delete[] D0;
+  }
 }
 
-int KarniadakisSolver::init(bool restarting, int nout, BoutReal tstep) {
-  int msg_point = msg_stack.push("Initialising Karniadakis solver");
+int KarniadakisSolver::init(int nout, BoutReal tstep) {
+  TRACE("Initialising Karniadakis solver");
   
   /// Call the generic initialisation first
-  if(Solver::init(restarting, nout, tstep))
+  if (Solver::init(nout, tstep))
     return 1;
   
   output << "\n\tKarniadakis solver\n";
-  
+ 
   nsteps = nout; // Save number of output steps
   out_timestep = tstep;
   
@@ -94,8 +104,6 @@ int KarniadakisSolver::init(bool restarting, int nout, BoutReal tstep) {
   save_vars(f0);
   
   // Get options
-  Options *options = Options::getRoot();
-  options = options->getSection("solver");
   OPTION(options, timestep, tstep);
   
   // Make sure timestep divides into tstep
@@ -107,13 +115,11 @@ int KarniadakisSolver::init(bool restarting, int nout, BoutReal tstep) {
 
   timestep = tstep / ((float) nsubsteps);
   
-  msg_stack.pop(msg_point);
-
   return 0;
 }
 
 int KarniadakisSolver::run() {
-  int msg_point = msg_stack.push("KarniadakisSolver::run()");
+  TRACE("KarniadakisSolver::run()");
   
   for(int i=0;i<nsteps;i++) {
     // Run through a fixed number of steps
@@ -142,32 +148,28 @@ int KarniadakisSolver::run() {
     // Call RHS to communicate and get auxilliary variables
     load_vars(f0);
     run_rhs(simtime);
-
-    /// Write the restart file
-    restart.write();
-    
-    if((archive_restart > 0) && (iteration % archive_restart == 0)) {
-      restart.write("%s/BOUT.restart_%04d.%s", restartdir.c_str(), iteration, restartext.c_str());
-    }
     
     /// Call the monitor function
     
     if(call_monitors(simtime, i, nsteps)) {
       // User signalled to quit
-      
-      // Write restart to a different file
-      restart.write("%s/BOUT.final.%s", restartdir.c_str(), restartext.c_str());
-      
-      output.write("Monitor signalled to quit. Returning\n");
       break;
     }
     // Reset iteration and wall-time count
     rhs_ncalls = 0;
+    rhs_ncalls_i = 0;
+    rhs_ncalls_e = 0;
   }
   
-  msg_stack.pop(msg_point);
-  
   return 0;
+}
+
+void KarniadakisSolver::resetInternalFields(){
+  //Make sure all other fields get reset
+  first_time=true;
+
+  //Copy fields into vector
+  save_vars(f0);
 }
 
 void KarniadakisSolver::take_step(BoutReal dt) {
@@ -181,14 +183,17 @@ void KarniadakisSolver::take_step(BoutReal dt) {
     // Initialise values
     #pragma omp parallel for
     for(int i=0;i<nlocal;i++) {
-      fm1[i] = fm2[i] = f0[i];
+    //fm1[i] = fm2[i] = f0[i];
+      fm1[i] = f0[i] - dt*S0[i];
+      fm2[i] = fm1[i] - dt*S0[i];
       Sm1[i] = Sm2[i] = S0[i];
     }
+    first_time = false;
   }
 
   #pragma omp parallel for
   for(int i=0;i<nlocal;i++)
-    f1[i] = (6./11.) * (3.*f0[i] - 1.5*fm1[i] + (1./3.)*fm2[i]) + dt*(3.*S0[i] - 3.*Sm1[i] + Sm2[i]);
+    f1[i] = (6./11.) * (3.*f0[i] - 1.5*fm1[i] + (1./3.)*fm2[i] + dt*(3.*S0[i] - 3.*Sm1[i] + Sm2[i]));
   
   // D0 = S(f0)
   load_vars(f0);
@@ -198,5 +203,5 @@ void KarniadakisSolver::take_step(BoutReal dt) {
   // f1 = f1 + dt*D0
   #pragma omp parallel for
   for(int i=0;i<nlocal;i++)
-    f1[i] += dt*D0[i];
+    f1[i] += (6./11.) * dt*D0[i];
 }

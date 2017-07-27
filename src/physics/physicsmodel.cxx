@@ -30,31 +30,30 @@
 
 #include <bout/physicsmodel.hxx>
 
+PhysicsModel::PhysicsModel() : solver(0), splitop(false), 
+                               userprecon(0), userjacobian(0), initialised(false) {
+  
+  // Set up restart file
+  restart = Datafile(Options::getRoot()->getSection("restart"));
+}
+
 PhysicsModel::~PhysicsModel() {
 }
 
 int PhysicsModel::runRHS(BoutReal time) {
-  if (!userrhs)
-    return 1;
-  return (*this.*userrhs)(time);
+  return rhs(time);
 }
 
 bool PhysicsModel::splitOperator() {
-  return (userconv != 0);
+  return splitop;
 }
 
 int PhysicsModel::runConvective(BoutReal time) {
-  if(!userconv)
-    return 1;
-  
-  return (*this.*userconv)(time);
+  return convective(time);
 }
 
-int PhysicsModel::runDiffusive(BoutReal time) {
-  if(!userdiff)
-    return 1;
-  
-  return (*this.*userdiff)(time);
+int PhysicsModel::runDiffusive(BoutReal time, bool linear) {
+  return diffusive(time, linear);
 }
 
 bool PhysicsModel::hasPrecon() {
@@ -72,7 +71,7 @@ bool PhysicsModel::hasJacobian() {
 }
 
 int PhysicsModel::runJacobian(BoutReal t) {
-  if(!userjacobian)
+  if (!userjacobian)
     return 1;
   return (*this.*userjacobian)(t);
 }
@@ -92,4 +91,52 @@ void PhysicsModel::bout_solve(Vector2D &var, const char *name) {
 
 void PhysicsModel::bout_solve(Vector3D &var, const char *name) {
   solver->add(var, name);
+}
+
+int PhysicsModel::postInit(bool restarting) {
+  TRACE("PhysicsModel::postInit");
+  
+  // Add the solver variables to the restart file
+  // Second argument specifies no time history
+  solver->outputVars(restart, false);
+
+  string restart_dir;  ///< Directory for restart files
+  string dump_ext, restart_ext;  ///< Dump, Restart file extension
+  
+  Options *options = Options::getRoot();
+  if (options->isSet("restartdir")) {
+    // Solver-specific restart directory
+    options->get("restartdir", restart_dir, "data");
+  } else {
+    // Use the root data directory
+    options->get("datadir", restart_dir, "data");
+  }
+  /// Get restart file extension
+  options->get("dump_format", dump_ext, "nc");
+  options->get("restart_format", restart_ext, dump_ext);
+
+  string filename = restart_dir + "/BOUT.restart."+restart_ext;
+  if (restarting) {
+    output.write("Loading restart file: %s\n", filename.c_str());
+
+    /// Load restart file
+    if (!restart.openr(filename.c_str()))
+      throw BoutException("Error: Could not open restart file\n");
+    if (!restart.read())
+      throw BoutException("Error: Could not read restart file\n");
+    restart.close();
+  }
+
+  // Add mesh information to restart file
+  // Note this is done after reading, so mesh variables
+  // are not overwritten.
+  mesh->outputVars(restart);
+  // Version expected by collect routine
+  restart.addOnce(const_cast<BoutReal &>(BOUT_VERSION), "BOUT_VERSION");
+
+  /// Open the restart file for writing
+  if (!restart.openw(filename.c_str()))
+    throw BoutException("Error: Could not open restart file for writing\n");
+
+  return 0;
 }
