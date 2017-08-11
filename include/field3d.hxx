@@ -335,6 +335,16 @@ class Field3D : public Field, public FieldData {
   const BoutReal& operator[](bindex &bx) const {
     return operator()(bx.jx, bx.jy, bx.jz);
   }
+
+  // This here for testing
+  BoutReal& operator[](const int i) {
+    return data[i];
+  }
+
+  // Here for testing
+  const BoutReal& operator[](const int i) const {
+    return data[i];
+  }
   
   /*!
    * Direct access to the underlying data array
