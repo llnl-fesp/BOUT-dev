@@ -9,6 +9,7 @@
 #include <iostream>
 #include <iterator>
 #include <time.h>
+#include <vector>
 
 // A simple iterator over a 3D set of indices
 class MeshIterator
@@ -68,6 +69,124 @@ private:
     }
   }
 };
+
+///////////////////////////////////////////////////////////////////////////////////
+// Vector of single indices
+
+/// A single index over the whole 3D mesh
+/// This is just a wrapper around a single integer, with some methods
+/// for stencil operations.
+///
+/// This version includes a pointer to Mesh, which simplifies
+/// the stencil operations, and allows checking when multiple meshes are used,
+/// but does increase the memory usage and (maybe) efficiency
+struct SingleIndex3D_mesh {
+  int index; ///< The index in 3D
+  Mesh *mesh; ///< The mesh over which we're indexing
+
+  /// Here the offset is a method on the index object
+  SingleIndex3D_mesh xp() {
+    return { index + mesh->LocalNz * mesh->LocalNy, mesh };
+  }
+};
+
+using Region_mesh = std::vector<SingleIndex3D_mesh>;
+
+Region_mesh region_mesh(Mesh *mesh) {
+  int npoints = mesh->LocalNx * mesh->LocalNy * mesh->LocalNz;
+  Region_mesh region(npoints);
+  
+  for(int i=0;i<npoints;i++) {
+    region[i] = {i, mesh};
+  }
+  return region;
+}
+
+///////////////////////////////////////////////////////////////////////////////////
+// Vector of single indices, special handling of offsets
+
+/// A single index over the whole 3D mesh
+///
+/// This version has no Mesh pointer. This reduces memory use,
+/// but means that indexing requires a 
+struct SingleIndex3D {
+  int index; ///< The index in 3D
+};
+
+/// This represents an offset from an index, using a Mesh
+/// The offset is constructed with three indices,
+/// so does not optimise simple cases where some of these indices are zero.
+/// For optimisation there is the IndexOffset<> template class below, but that
+/// could not easily be passed between functions
+///
+/// Example:
+///
+/// IndexOffsetAny xp(1,0,0, mesh);
+/// IndexOffsetAny xm(-1,0,0, mesh);
+/// for(auto &i : region(mesh) ) {
+///    result[i] = f[xp(i)] - f[xm(i)]
+/// }
+/// 
+struct IndexOffsetAny {
+  int xo, yo, zo;
+  Mesh *mesh;
+
+  SingleIndex3D operator()(const SingleIndex3D &i) {
+    return {i.index + zo + mesh->LocalNz * (yo + mesh->LocalNy*xo)};
+  }
+};
+
+/// This represents an offset from an index, using a Mesh
+///
+/// Note: Making this offset a template may have performance benefits,
+/// but makes passing into/out of functions hard, since each offset is a
+/// different type.
+/// 
+/// Example:
+///
+/// IndexOffset<1,0,0> xp(mesh);
+/// IndexOffset<-1,0,0> xm(mesh);
+/// for(auto &i : region(mesh) ) {
+///    result[i] = f[xp(i)] - f[xm(i)]
+/// }
+///
+///
+template<int xo, int yo, int zo>
+struct IndexOffset {
+  Mesh *mesh;
+
+  SingleIndex3D operator()(const SingleIndex3D &i) {
+    return {i.index + zo + mesh->LocalNz * (yo + mesh->LocalNy*xo)};
+  }
+};
+
+// Specialised forms for common offsets e.g. xp:
+template<>
+struct IndexOffset<1,0,0> {
+  Mesh *mesh;
+
+  SingleIndex3D operator()(const SingleIndex3D &i) {
+    return {i.index + mesh->LocalNz * mesh->LocalNy};
+  }
+};
+
+/// Define a Region as a vector of indices
+using Region = std::vector<SingleIndex3D>;
+
+/// Create a Region over the whole mesh
+Region region(Mesh *mesh) {
+  int npoints = mesh->LocalNx * mesh->LocalNy * mesh->LocalNz;
+  Region reg(npoints);
+  
+  for(int i=0;i<npoints;i++) {
+    reg[i] = {i};
+  }
+  return reg;
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////
+
 
 int main(int argc, char **argv) {
   BoutInitialise(argc, argv);
@@ -168,6 +287,44 @@ int main(int argc, char **argv) {
     for(DataIterator d = result.iterator(); !d.done(); d++)
       result[d] = a[d] + b[d];
   Duration elapsed10 = steady_clock::now() - start10;
+
+  // Iterator over vector with mesh pointer
+  SteadyClock start11 = steady_clock::now();
+  for(int x=0;x<10;x++) {
+    for( auto &i : region_mesh(mesh) ) {
+      result[i.index] = a[i.index] + b[i.index];
+    }
+  } 
+  Duration elapsed11 = steady_clock::now() - start11;
+
+  // Iterator over vector without mesh pointer
+  SteadyClock start12 = steady_clock::now();
+  for(int x=0;x<10;x++) {
+    for( auto &i : region(mesh) ) {
+      result[i.index] = a[i.index] + b[i.index];
+    }
+  } 
+  Duration elapsed12 = steady_clock::now() - start12;
+
+  // Iterator over vector with mesh pointer, not timing vector construction
+  auto reg_m = region_mesh(mesh);
+  SteadyClock start13 = steady_clock::now();
+  for(int x=0;x<10;x++) {
+    for( auto &i : reg_m ) {
+      result[i.index] = a[i.index] + b[i.index];
+    }
+  } 
+  Duration elapsed13 = steady_clock::now() - start13;
+
+  // Iterator over vector without mesh pointer, not timing vector construction
+  auto reg = region(mesh);
+  SteadyClock start14 = steady_clock::now();
+  for(int x=0;x<10;x++) {
+    for( auto &i : reg ) {
+      result[i.index] = a[i.index] + b[i.index];
+    }
+  } 
+  Duration elapsed14 = steady_clock::now() - start14;
   
   output << "TIMING\n======\n";
   output << "C loop                     : " << elapsed1.count() << std::endl;
@@ -180,6 +337,12 @@ int main(int argc, char **argv) {
   output << "------ [i] indexing -------" << std::endl;
   output << "C++11 Range-based for      : " << elapsed9.count() << std::endl;
   output << "DataIterator (done)        : " << elapsed10.count() << std::endl;
+  output << "------ vector of indices --" << std::endl;
+  output << "With mesh member           : " << elapsed11.count() << std::endl;
+  output << "Without mesh member        : " << elapsed12.count() << std::endl;
+  output << "With mesh, no construct    : " << elapsed13.count() << std::endl;
+  output << "Without mesh, no construct : " << elapsed14.count() << std::endl;
+  
 
   BoutFinalise();
   return 0;
