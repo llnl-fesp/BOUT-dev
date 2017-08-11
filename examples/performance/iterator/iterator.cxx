@@ -325,6 +325,19 @@ int main(int argc, char **argv) {
     }
   } 
   Duration elapsed14 = steady_clock::now() - start14;
+
+  // Iterator over vector without mesh pointer, not timing vector construction
+  // edited to get vectorization
+  //auto reg = region(mesh);
+  SteadyClock start15 = steady_clock::now();
+  for(int x=0;x<10;x++) {
+#pragma ivdep
+    for( int j=0; j<reg.size(); j++ ) {
+      int i = reg[j].index;
+      result[i] = a[i] + b[i];
+    }
+  } 
+  Duration elapsed15 = steady_clock::now() - start15;
   
   output << "TIMING\n======\n";
   output << "C loop                     : " << elapsed1.count() << std::endl;
@@ -342,6 +355,7 @@ int main(int argc, char **argv) {
   output << "Without mesh member        : " << elapsed12.count() << std::endl;
   output << "With mesh, no construct    : " << elapsed13.count() << std::endl;
   output << "Without mesh, no construct : " << elapsed14.count() << std::endl;
+  output << " ditto, with explicit loop : " << elapsed15.count() << std::endl;
   
 
   BoutFinalise();
