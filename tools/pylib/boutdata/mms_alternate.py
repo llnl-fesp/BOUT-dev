@@ -51,7 +51,7 @@ def ddt(f):
 
 
 def DDX(f):
-    return diff(f, metric.x)
+    return diff(f, metric.x)/metric.psiwidth
 
 def DDY(f):
     return diff(f, metric.y)
@@ -61,7 +61,7 @@ def DDZ(f):
 
 
 def D2DX2(f):
-    return diff(f, metric.x, 2)
+    return diff(f, metric.x, 2)/metric.psiwidth**2
 
 def D2DY2(f):
     return diff(f, metric.y, 2)
@@ -93,10 +93,10 @@ def bracket(f, g):
     Calculates [f,g] symbolically
     """
 
-    dfdx = diff(f, metric.x)
+    dfdx = diff(f, metric.x)/metric.psiwidth
     dfdz = diff(f, metric.z)
 
-    dgdx = diff(g, metric.x)
+    dgdx = diff(g, metric.x)/metric.psiwidth
     dgdz = diff(g, metric.z)
 
     return dfdz * dgdx - dfdx * dgdz
@@ -131,28 +131,28 @@ def Delp2(f, all_terms=True):
     in the BOUT.inp file (laplace section)
 
     """
-    d2fdx2 = diff(f, metric.x, 2)
-    d2fdz2 = diff(f, metric.z, 2)
-    d2fdxdz = diff(f, metric.x, metric.z)
+    d2fdx2 = D2DX2(f)
+    d2fdz2 = D2DZ2(f)
+    d2fdxdz = D2DXDZ(f)
 
     result = metric.g11*d2fdx2 + metric.g33*d2fdz2 + 2.*metric.g13*d2fdxdz
 
     if all_terms:
         G1 = (DDX(metric.J*metric.g11) + DDY(metric.J*metric.g12) + DDZ(metric.J*metric.g13)) / metric.J
         G3 = (DDX(metric.J*metric.g13) + DDY(metric.J*metric.g23) + DDZ(metric.J*metric.g33)) / metric.J
-        result += G1 * diff(f, metric.x) + G3 * diff(f, metric.z)
+        result += G1 * DDX(f) + G3 * DDZ(f)
 
     return result
 
 def Delp4(f):
-    d4fdx4 = diff(f, metric.x, 4)
-    d4fdz4 = diff(f, metric.z, 4)
+    d4fdx4 = D2DX2(D2DX2(f))
+    d4fdz4 = D2DZ2(D2DZ2(f))
 
     return d4fdx4 + d4fdz4
 
 def Grad_par(f):
     """The parallel gradient"""
-    return diff(f, metric.y) / sqrt(metric.g_22)
+    return DDY(f) / sqrt(metric.g_22)
 
 def Vpar_Grad_par(v, f):
     """Parallel advection operator v*grad_||(f)"""
@@ -182,7 +182,7 @@ def Laplace_par(f):
     """
     Div( b (b.Grad(f) ) ) = (1/J) d/dy ( J/g_22 * df/dy )
     """
-    return diff( (metric.J/metric.g_22)*diff(f, metric.y), metric.y)/ metric.J
+    return DDY(metric.J/metric.g_22)*DDY(f)/ metric.J
 
 def Laplace_perp(f):
     """
@@ -204,7 +204,8 @@ def trySimplify(expr):
         return expr
 
 def exprToStr(expr):
-    """ Convert a sympy expression to a string for BOUT++ input
+    """
+    Convert a sympy expression to a string for BOUT++ input
     """
 
     s = str(expr).replace("**", "^") # Replace exponent operator
@@ -388,26 +389,27 @@ class BaseTokamak(object):
         metric.J = self.hthe / self.Bpxy
         metric.B = self.Bxy
 
-        # Convert all "x" symbols from [0,1] into flux
-        metric.Lx = self.psiwidth
-        xsub = metric.x / self.psiwidth
+        # Convert all "x" symbols from flux to [0,1]
+        xsub = self.psi0/2. + metric.x * self.psiwidth
 
-        #metric.g11 = metric.g11.subs(x, xsub)
-        #metric.g22 = metric.g22.subs(x, xsub)
-        #metric.g33 = metric.g33.subs(x, xsub)
-        #metric.g12 = metric.g12.subs(x, xsub)
-        #metric.g13 = metric.g13.subs(x, xsub)
-        #metric.g23 = metric.g23.subs(x, xsub)
+        metric.g11 = metric.g11.subs(x, xsub)
+        metric.g22 = metric.g22.subs(x, xsub)
+        metric.g33 = metric.g33.subs(x, xsub)
+        metric.g12 = metric.g12.subs(x, xsub)
+        metric.g13 = metric.g13.subs(x, xsub)
+        metric.g23 = metric.g23.subs(x, xsub)
 
-        #metric.g_11 = metric.g_11.subs(x, xsub)
-        #metric.g_22 = metric.g_22.subs(x, xsub)
-        #metric.g_33 = metric.g_33.subs(x, xsub)
-        #metric.g_12 = metric.g_12.subs(x, xsub)
-        #metric.g_13 = metric.g_13.subs(x, xsub)
-        #metric.g_23 = metric.g_23.subs(x, xsub)
+        metric.g_11 = metric.g_11.subs(x, xsub)
+        metric.g_22 = metric.g_22.subs(x, xsub)
+        metric.g_33 = metric.g_33.subs(x, xsub)
+        metric.g_12 = metric.g_12.subs(x, xsub)
+        metric.g_13 = metric.g_13.subs(x, xsub)
+        metric.g_23 = metric.g_23.subs(x, xsub)
 
-        #metric.J = metric.J.subs(x, xsub)
-        #metric.B = metric.B.subs(x, xsub)
+        metric.J = metric.J.subs(x, xsub)
+        metric.B = metric.B.subs(x, xsub)
+
+        metric.psiwidth = self.psiwidth
 
         self.metric_is_set = True
 
@@ -417,6 +419,10 @@ class BaseTokamak(object):
         """
         if not self.metric_is_set:
             raise ValueError("Error: metric has not been calculated yet, so cannot print")
+
+        print("dx = "+exprToStr(self.psiwidth)+"/nx")
+        print("dy = 2.*pi/ny")
+        print("dz = 2.*pi/nz")
         print("g11 = "+exprToStr(metric.g11))
         print("g22 = "+exprToStr(metric.g22))
         print("g33 = "+exprToStr(metric.g33))
@@ -474,22 +480,29 @@ class SimpleTokamak(BaseTokamak):
         # Minor radius
         self.r = R * eps
 
+        # Approximate poloidal field for radial width calculation
+        Bp0 = Bt * self.r / (q(0.5) * self.R)
+
+        # dpsi = Bp * R * dr  -- width of the box in psi space
+        self.psiwidth = Bp0 * self.R * self.dr
+        self.psi0 = Bp0 * R * 2*self.r # value of psi at 'separatrix' taken to be at 2r, psi=0 at magnetic axis
+
         # Get safety factor
-        self.q = q(x)
+        self.q = q(x/self.psi0)
 
         # Toroidal angle of a field-line as function
         # of poloidal angle y
-        self.zShift = self.q*(y + eps * sin(y))
+        self.zShift = self.q*(self.y-pi + eps * sin(y-pi))
 
         # Field-line pitch
-        self.nu = self.q*(1 + eps*cos(y)) #diff(self.zShift, y)
+        self.nu = self.q*(1 + eps*cos(y-pi)) #diff(self.zShift, y)
 
         # Coordinates of grid points
-        self.Rxy = R - self.r * cos(y)
-        self.Zxy = self.r * sin(y)
+        self.Rxy = R - self.r * cos(y-pi)
+        self.Zxy = self.r * sin(y-pi)
 
         # Poloidal arc length
-        self.hthe = self.r + 0.*x
+        self.hthe = self.r + 0.*y
 
         # Toroidal magnetic field
         self.Btxy = Bt * R / self.Rxy
@@ -500,16 +513,8 @@ class SimpleTokamak(BaseTokamak):
         # Total magnetic field
         self.Bxy = sqrt(self.Btxy**2 + self.Bpxy**2)
 
-        # Approximate poloidal field for radial width calculation
-        Bp0 = Bt * self.r / (q(0.5) * R)
-        #print("Bp0 = %e" % Bp0)
-
-        # dx = Bp * R * dr  -- width of the box in psi space
-        self.psiwidth = Bp0 * R * dr
-        #print("psi width = %e" % self.psiwidth)
-
         # Integrated shear
-        self.sinty = diff(self.zShift, x) / self.psiwidth
+        self.sinty = diff(self.zShift, x)
 
         # Extra expressions to add to grid file
         self._extra = {}
