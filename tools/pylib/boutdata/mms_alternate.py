@@ -51,6 +51,7 @@ def ddt(f):
 
 
 def DDX(f):
+    # psiwidth = dx/dx_in
     return diff(f, metric.x)/metric.psiwidth
 
 def DDY(f):
@@ -93,11 +94,11 @@ def bracket(f, g):
     Calculates [f,g] symbolically
     """
 
-    dfdx = diff(f, metric.x)/metric.psiwidth
-    dfdz = diff(f, metric.z)
+    dfdx = DDX(f)
+    dfdz = DDZ(f)
 
-    dgdx = diff(g, metric.x)/metric.psiwidth
-    dgdz = diff(g, metric.z)
+    dgdx = DDX(g)
+    dgdz = DDZ(g)
 
     return dfdz * dgdx - dfdx * dgdz
 
@@ -386,28 +387,10 @@ class BaseTokamak(object):
         metric.g_13 = self.sinty*self.Rxy**2
         metric.g_23 = sbp*self.Btxy*self.hthe*self.Rxy / self.Bpxy
 
+        metric.zShift = self.zShift
+
         metric.J = self.hthe / self.Bpxy
         metric.B = self.Bxy
-
-        # Convert all "x" symbols from flux to [0,1]
-        xsub = self.psi0/2. + metric.x * self.psiwidth
-
-        metric.g11 = metric.g11.subs(x, xsub)
-        metric.g22 = metric.g22.subs(x, xsub)
-        metric.g33 = metric.g33.subs(x, xsub)
-        metric.g12 = metric.g12.subs(x, xsub)
-        metric.g13 = metric.g13.subs(x, xsub)
-        metric.g23 = metric.g23.subs(x, xsub)
-
-        metric.g_11 = metric.g_11.subs(x, xsub)
-        metric.g_22 = metric.g_22.subs(x, xsub)
-        metric.g_33 = metric.g_33.subs(x, xsub)
-        metric.g_12 = metric.g_12.subs(x, xsub)
-        metric.g_13 = metric.g_13.subs(x, xsub)
-        metric.g_23 = metric.g_23.subs(x, xsub)
-
-        metric.J = metric.J.subs(x, xsub)
-        metric.B = metric.B.subs(x, xsub)
 
         metric.psiwidth = self.psiwidth
 
@@ -420,7 +403,7 @@ class BaseTokamak(object):
         if not self.metric_is_set:
             raise ValueError("Error: metric has not been calculated yet, so cannot print")
 
-        print("dx = "+exprToStr(self.psiwidth)+"/nx")
+        print("dx = "+exprToStr(self.psiwidth)+"/(nx-2*mxg)")
         print("dy = 2.*pi/ny")
         print("dz = 2.*pi/nz")
         print("g11 = "+exprToStr(metric.g11))
@@ -447,7 +430,7 @@ class SimpleTokamak(BaseTokamak):
     NOTE: This is NOT an equilibrium calculation. The input
     is intended solely for testing with MMS
     """
-    def __init__(self, R = 2, Bt = 1.0, eps = 0.1, dr=0.02, q = lambda x:2+x**2):
+    def __init__(self, R = 2, Bt = 1.0, eps = 0.1, dr=0.02, psiN0=0.5, q = lambda x:2+x**2):
         """
         R    - Major radius [metric]
 
@@ -459,15 +442,17 @@ class SimpleTokamak(BaseTokamak):
 
         q(x) - A function which returns the safety factor
                as a function of x in range [0,1]
+        
+        psiN0- Normalized poloidal flux of inner edge of grid
 
 
         Coordinates:
-        x - Radial, [0,1]
+        x - Radial, [0,psiwidth], x=psi-psi_inner so dx=dpsi but x=0 at the inner edge of the grid
         y - Poloidal, [0,2pi]. Origin is at inboard midplane.
 
 
         """
-        # X has a range [0,1], and y [0,2pi]
+        # X has a range [0,psiwidth], and y [0,2pi]
         #x, y = symbols("x y")
 
         self.x = x
@@ -481,14 +466,14 @@ class SimpleTokamak(BaseTokamak):
         self.r = R * eps
 
         # Approximate poloidal field for radial width calculation
-        Bp0 = Bt * self.r / (q(0.5) * self.R)
+        Bp0 = Bt * self.r / (q(psiN0) * self.R)
 
         # dpsi = Bp * R * dr  -- width of the box in psi space
         self.psiwidth = Bp0 * self.R * self.dr
-        self.psi0 = Bp0 * R * 2*self.r # value of psi at 'separatrix' taken to be at 2r, psi=0 at magnetic axis
+        self.psi0 = Bp0 * R * self.r # value of psi at 'separatrix' taken to be at r, psi=0 at magnetic axis
 
         # Get safety factor
-        self.q = q(x/self.psi0)
+        self.q = q((x + psiN0*self.psi0)/self.psi0)
 
         # Toroidal angle of a field-line as function
         # of poloidal angle y
@@ -498,11 +483,11 @@ class SimpleTokamak(BaseTokamak):
         self.nu = self.q*(1 + eps*cos(y-pi)) #diff(self.zShift, y)
 
         # Coordinates of grid points
-        self.Rxy = R - self.r * cos(y-pi)
-        self.Zxy = self.r * sin(y-pi)
+        self.Rxy = R - self.r*psiN0 * cos(y-pi)
+        self.Zxy = self.r*psiN0 * sin(y-pi)
 
         # Poloidal arc length
-        self.hthe = self.r + 0.*y
+        self.hthe = self.r*psiN0 + 0.*y
 
         # Toroidal magnetic field
         self.Btxy = Bt * R / self.Rxy
@@ -515,6 +500,20 @@ class SimpleTokamak(BaseTokamak):
 
         # Integrated shear
         self.sinty = diff(self.zShift, x)
+
+        # Convert all "x" symbols from flux to [0,1]
+        xsub = metric.x * self.psiwidth
+
+        self.q = self.q.subs(x, xsub)
+        self.zShift = self.zShift.subs(x, xsub)
+        self.nu = self.nu.subs(x, xsub)
+        self.Rxy = self.Rxy.subs(x, xsub)
+        self.Zxy = self.Zxy.subs(x, xsub)
+        self.hthe = self.hthe.subs(x, xsub)
+        self.Btxy = self.Btxy.subs(x, xsub)
+        self.Bpxy = self.Bpxy.subs(x, xsub)
+        self.Bxy = self.Bxy.subs(x, xsub)
+        self.sinty = self.sinty.subs(x, xsub)
 
         # Extra expressions to add to grid file
         self._extra = {}
