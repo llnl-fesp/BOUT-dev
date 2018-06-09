@@ -7,7 +7,7 @@ from sys import exit
 global metric
 
 # Define non-trivial metrics
-geometry = SimpleTokamak()
+geometry = SimpleTokamak(zperiod=600)
 #geometry = ShapedTokamak()
 
 # Define manufactured solution in toroidal x, y=theta, z=phi
