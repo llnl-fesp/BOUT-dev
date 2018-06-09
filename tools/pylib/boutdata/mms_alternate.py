@@ -455,8 +455,9 @@ class SimpleTokamak(BaseTokamak):
 
 
         """
-        # X has a range [0,psiwidth], and y [0,2pi]
-        #x, y = symbols("x y")
+
+        # Have we calculated metric components yet?
+        self.metric_is_set = False
 
         self.x = x
         self.y = y
@@ -530,7 +531,7 @@ class SimpleTokamak(BaseTokamak):
 # Shaped tokamak
 
 class ShapedTokamak(object):
-    def __init__(self, Rmaj=6.0, rmin=2.0, dr=0.1, kappa=1.0, delta=0.0, b=0.0, ss=0.0, Bt0=1.0, Bp0 = 0.2):
+    def __init__(self, Rmaj=6.0, rmin=2.0, dr=0.1, kappa=1.0, delta=0.0, b=0.0, ss=0.0, Bt0=1.0, Bp0 = 0.2, zperiod=1):
         """
         Rmaj  - Major radius [metric]
         rmin  - Minor radius [metric]
@@ -557,18 +558,21 @@ class ShapedTokamak(object):
 
         """
 
+        xin = symbols("xin") # xin=x/psiwidth
+        self.zperiod = zperiod
+
         # Have we calculated metric components yet?
         self.metric_is_set = False
 
-        # Minor radius as function of x
-        rminx = rmin + (x-0.5)*dr
+        # Minor radius as function of xin
+        rminx = rmin + (xin-0.5)*dr
 
         # Analytical expression for R and Z coordinates as function of x and y
-        Rxy = Rmaj - b + (rminx + b*cos(y))*cos(y + delta*sin(y)) + ss*(0.5-x)*(dr/rmin)
-        Zxy = kappa * rminx * sin(y)
+        self.Rxy = Rmaj - b + (rminx + b*cos(y))*cos(y + delta*sin(y)) + ss*(0.5-xin)*(dr/rmin)
+        self.Zxy = kappa * rminx * sin(y)
 
         # Toroidal magnetic field
-        Btxy = Bt0 * Rmaj / Rxy
+        self.Btxy = Bt0 * Rmaj / self.Rxy
 
         # Poloidal field. dx constant, so set poloidal field
         # at outboard midplane (y = 0)
@@ -577,38 +581,58 @@ class ShapedTokamak(object):
         # Distance between flux surface relative to outboard midplane.
         expansion = (1 - ss/rmin)*cos(y)/(1 - (ss/rmin))
 
-        Bpxy = Bp0 * ((Rmaj + rmin) / Rxy) / expansion
+        self.Bpxy = Bp0 * ((Rmaj + rmin) / self.Rxy) / expansion
+        self.B = sqrt(self.Btxy**2 + self.Bpxy**2)
 
         # Calculate hthe
-        hthe = sqrt(diff(Rxy, y)**2 + diff(Zxy, y)**2)
+        self.hthe = sqrt(diff(self.Rxy, y)**2 + diff(self.Zxy, y)**2)
         try:
-            hthe = trigsimp(hthe)
+            self.hthe = trigsimp(self.hthe)
         except ValueError:
             pass
 
+        # calculate width in psi
+        drdxin = diff(self.Rxy, xin).subs(y, 0)
+        dpsidr = (self.Bpxy * self.Rxy).subs(y, 0)
+        self.psiwidth = integrate(dpsidr * drdxin, (xin, 0, 1))
+
         # Field-line pitch
-        nu = Btxy * hthe / (Bpxy * Rxy)
+        nu = self.Btxy * self.hthe / (self.Bpxy * self.Rxy)
 
         # Shift angle
         # NOTE: Since x has a range [0,1] this could be done better
         # than ignoring convergence conditions
+        print(nu)
         self.zShift = integrate(nu, (y,0,y), conds='none')
 
         # Safety factor
         self.shiftAngle = self.zShift.subs(y, 2*pi) - self.zShift.subs(y, 0)
+        self.q = self.shiftAngle/2/pi
 
         # Integrated shear
-        self.I = diff(self.zShift, x)
+        self.I = diff(self.zShift.subs(xin, x/self.psiwidth), x)
 
-        # X has a range [0,1], and y [0,2pi]
+        # X has a range [0,psiwidth], and y [0,2pi]
         self.x = x
         self.y = y
 
-        self.R = Rxy
-        self.Z = Zxy
+        # Convert all "x" symbols from flux to [0,1]
+        # Then convert "xin" (which is already [0,1]) to "x"
+        xsub = metric.x * self.psiwidth
 
-        self.Bt = Btxy
-        self.Bp = Bpxy
-        self.B = sqrt(Btxy**2 + Bpxy**2)
+        self.q = self.q.subs(x, xsub).subs(xin, x)
+        self.zShift = self.zShift.subs(x, xsub).subs(xin, x)
+        self.nu = self.nu.subs(x, xsub).subs(xin, x)
+        self.Rxy = self.Rxy.subs(x, xsub).subs(xin, x)
+        self.Zxy = self.Zxy.subs(x, xsub).subs(xin, x)
+        self.hthe = self.hthe.subs(x, xsub).subs(xin, x)
+        self.Btxy = self.Btxy.subs(x, xsub).subs(xin, x)
+        self.Bpxy = self.Bpxy.subs(x, xsub).subs(xin, x)
+        self.Bxy = self.Bxy.subs(x, xsub).subs(xin, x)
+        self.sinty = self.sinty.subs(x, xsub).subs(xin, x)
 
-        self.hthe = hthe
+        # Extra expressions to add to grid file
+        self._extra = {}
+
+        # Calculate metric terms
+        self.metric()
