@@ -268,6 +268,10 @@ class BoutOptionsFile(BoutOptions):
 
     def __init__(self, filename="BOUT.inp", name="root", gridfilename=None, nx=None, ny=None, nz=None):
         BoutOptions.__init__(self, name)
+        self.gridfilename = gridfilename
+        self.init_nx = nx
+        self.init_ny = ny
+        self.init_nz = nz
         # Open the file
         with open(filename, "r") as f:
             # Go through each line in the file
@@ -321,16 +325,23 @@ class BoutOptionsFile(BoutOptions):
 
                         section[line[:eqpos].strip()] = value
 
+        # define arrays of x, y, z to be used for substitutions
+        self.calc_xyz()
+
+    def calc_xyz(self):
         try:
             # define arrays of x, y, z to be used for substitutions
             gridfile = None
             nzfromfile = None
-            if gridfilename:
+            nx = self.init_nx
+            ny = self.init_ny
+            nz = self.init_nz
+            if self.gridfilename:
                 if nx is not None or ny is not None:
                     raise ValueError("nx or ny given as inputs even though "
                                      "gridfilename was given explicitly, "
                                      "don't know which parameters to choose")
-                with DataFile(gridfilename) as gridfile:
+                with DataFile(self.gridfilename) as gridfile:
                     self.nx = float(gridfile["nx"])
                     self.ny = float(gridfile["ny"])
                     try:
@@ -359,10 +370,10 @@ class BoutOptionsFile(BoutOptions):
                             nzfromfile = f["MZ"]
                     except (IOError, KeyError):
                         try:
-                            gridfilename = self["mesh"]["file"]
+                            self.gridfilename = self["mesh"]["file"]
                         except KeyError:
-                            gridfilename = self["grid"]
-                        with DataFile(gridfilename) as gridfile:
+                            self.gridfilename = self["grid"]
+                        with DataFile(self.gridfilename) as gridfile:
                             self.nx = float(gridfile["nx"])
                             self.ny = float(gridfile["ny"])
                             try:
@@ -380,8 +391,19 @@ class BoutOptionsFile(BoutOptions):
                     except KeyError:
                         if nzfromfile is not None:
                             self.nz = nzfromfile
-            mxg = self._keys.get("MXG", 2)
-            myg = self._keys.get("MYG", 2)
+            # check in both mesh and root sections
+            if "mxg" in self["mesh"]:
+                mxg = self["mesh"]["mxg"]
+            elif "mxg" in self:
+                mxg = self["mxg"]
+            else:
+                mxg = 2
+            if "myg" in self["mesh"]:
+                myg = self["mesh"]["myg"]
+            elif "myg" in self:
+                myg = self["myg"]
+            else:
+                myg = 2
 
             # make self.x, self.y, self.z three dimensional now so
             # that expressions broadcast together properly.
@@ -391,8 +413,12 @@ class BoutOptionsFile(BoutOptions):
             self.y = 2.*numpy.pi*numpy.linspace((0.5 - myg)/self.ny,
                                                 1.-(0.5 - myg)/self.ny,
                                                 self.ny + 2*myg)[numpy.newaxis, :, numpy.newaxis]
-            self.z = 2.*numpy.pi*numpy.linspace(0.5/self.nz,
-                                                1.-0.5/self.nz,
+            #'symmetric' version, not the current setting in BOUT++
+            #self.z = 2.*numpy.pi*numpy.linspace(0.5/self.nz,
+            #                                    1.-0.5/self.nz,
+            #                                    self.nz)[numpy.newaxis, numpy.newaxis, :]
+            self.z = 2.*numpy.pi*numpy.linspace(0.,
+                                                1.-1./self.nz,
                                                 self.nz)[numpy.newaxis, numpy.newaxis, :]
         except Exception as e:
             alwayswarn("While building x, y, z coordinate arrays, an "
