@@ -43,10 +43,14 @@ public:
   ShiftedMetricInterp() = delete;
   ShiftedMetricInterp(Mesh &mesh);
   ~ShiftedMetricInterp() {
-    delete interp_yup;
-    delete interp_ydown;
-    delete interp_to_aligned;
-    delete interp_from_aligned;
+    if (interp_yup != nullptr)
+      delete interp_yup;
+    if (interp_ydown != nullptr)
+      delete interp_ydown;
+    if (interp_to_aligned != nullptr)
+      delete interp_to_aligned;
+    if (interp_from_aligned != nullptr)
+      delete interp_from_aligned;
   }
   
   /*!
