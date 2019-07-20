@@ -97,7 +97,7 @@ char get_spin();                     // Produces a spinning bar
   value of BoutInitialise.
 
  */
-int BoutInitialise(int& argc, char**& argv) {
+int BoutInitialise(int& argc, char**& argv, void set_defaults()) {
 
   using namespace bout::experimental;
 
@@ -139,6 +139,9 @@ int BoutInitialise(int& argc, char**& argv) {
     OptionsReader* reader = OptionsReader::getInstance();
     reader->read(Options::getRoot(), "%s/%s", args.data_dir.c_str(),
                  args.opt_file.c_str());
+
+    // Allow user to override default values of options
+    set_defaults();
 
     // Get options override from command-line
     reader->parseCommandLine(Options::getRoot(), argc, argv);

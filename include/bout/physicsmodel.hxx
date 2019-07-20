@@ -149,6 +149,10 @@ public:
   int runJacobian(BoutReal t);
 
   int runTimestepMonitor(BoutReal simtime, BoutReal dt) {return timestepMonitor(simtime, dt);}
+
+  /// Overriding this method allows user to set default options before they are used by
+  /// the BOUT++ library, e.g. in initialising Mesh, etc.
+  static void setDefaults() {}
   
 protected:
   
@@ -303,28 +307,28 @@ private:
  *
  * BOUTMAIN(MyModel);
  */
-#define BOUTMAIN(ModelClass)                                       \
-  int main(int argc, char** argv) {                                \
-    int init_err = BoutInitialise(argc, argv);                     \
-    if (init_err < 0)                                              \
-      return 0;                                                    \
-    else if (init_err > 0)                                         \
-      return init_err;                                             \
-    try {                                                          \
-      auto model = bout::utils::make_unique<ModelClass>();         \
-      auto solver = std::unique_ptr<Solver>(Solver::create());     \
-      solver->setModel(model.get());                               \
-      auto bout_monitor = bout::utils::make_unique<BoutMonitor>(); \
-      solver->addMonitor(bout_monitor.get(), Solver::BACK);        \
-      solver->outputVars(bout::globals::dump);                     \
-      solver->solve();                                             \
-    } catch (const BoutException& e) {                             \
-      output << "Error encountered\n";                             \
-      output << e.getBacktrace() << endl;                          \
-      MPI_Abort(BoutComm::get(), 1);                               \
-    }                                                              \
-    BoutFinalise();                                                \
-    return 0;                                                      \
+#define BOUTMAIN(ModelClass)                                            \
+  int main(int argc, char** argv) {                                     \
+    int init_err = BoutInitialise(argc, argv, ModelClass::setDefaults); \
+    if (init_err < 0)                                                   \
+      return 0;                                                         \
+    else if (init_err > 0)                                              \
+      return init_err;                                                  \
+    try {                                                               \
+      auto model = bout::utils::make_unique<ModelClass>();              \
+      auto solver = std::unique_ptr<Solver>(Solver::create());          \
+      solver->setModel(model.get());                                    \
+      auto bout_monitor = bout::utils::make_unique<BoutMonitor>();      \
+      solver->addMonitor(bout_monitor.get(), Solver::BACK);             \
+      solver->outputVars(bout::globals::dump);                          \
+      solver->solve();                                                  \
+    } catch (const BoutException& e) {                                  \
+      output << "Error encountered\n";                                  \
+      output << e.getBacktrace() << endl;                               \
+      MPI_Abort(BoutComm::get(), 1);                                    \
+    }                                                                   \
+    BoutFinalise();                                                     \
+    return 0;                                                           \
   }
 
 /// Macro to replace solver->add, passing variable name

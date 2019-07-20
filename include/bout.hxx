@@ -88,7 +88,7 @@ using namespace bout::globals;
  * and using the BOUTMAIN macro.
  *
  */
-int BoutInitialise(int& argc, char**& argv);
+int BoutInitialise(int& argc, char**& argv, void set_defaults() = nullptr);
 
 namespace bout {
 namespace experimental {
