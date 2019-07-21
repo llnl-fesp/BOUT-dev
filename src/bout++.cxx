@@ -141,7 +141,9 @@ int BoutInitialise(int& argc, char**& argv, void set_defaults()) {
                  args.opt_file.c_str());
 
     // Allow user to override default values of options
-    set_defaults();
+    if (set_defaults) {
+      set_defaults();
+    }
 
     // Get options override from command-line
     reader->parseCommandLine(Options::getRoot(), argc, argv);
