@@ -475,7 +475,7 @@ public:
 
   /// Allow the user to override defaults set later, intended to be called in
   /// methods overriding PhysicsModel::setDefaults.
-  template <typename T> T overrideDefault(T def) {
+  template <typename T> void overrideDefault(T def) {
 
     // Set the type
     attributes["type"] = bout::utils::typeName<T>();
@@ -483,14 +483,8 @@ public:
     if (!is_value) {
       // Option not found
       assign(def, "user_default");
-      value_used = true; // Mark the option as used
       is_value = true; // Prevent this default being replaced by setDefault()
-
-      return def;
     }
-
-    // Return value of this option as type 'T'
-    return as<T>(def);
   }
 
   /// Get the parent Options object
